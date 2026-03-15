@@ -1,8 +1,14 @@
 import os
 import csv
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# Add project root to python path so 'src' can be imported
+BASE_DIR = Path(__file__).parent.parent.parent
+sys.path.append(str(BASE_DIR))
+
 from dotenv import load_dotenv
 from fyers_apiv3 import fyersModel
 from src.utils.logger_config import get_logger
