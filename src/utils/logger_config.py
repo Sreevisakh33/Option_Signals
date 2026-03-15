@@ -1,5 +1,6 @@
 import logging
 import sys
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 # Create a custom logger
@@ -11,7 +12,14 @@ c_handler = logging.StreamHandler(sys.stdout)
 # Ensure logs directory exists if we want to log to file
 log_dir = Path(__file__).parent.parent.parent / "logs"
 log_dir.mkdir(exist_ok=True)
-f_handler = logging.FileHandler(log_dir / "app.log")
+# f_handler = logging.FileHandler(log_dir / "app.log")
+f_handler = TimedRotatingFileHandler(
+    log_dir / "app.log",
+    when="midnight",
+    interval=1,
+    backupCount=2,
+    encoding="utf-8"
+)
 
 c_handler.setLevel(logging.INFO)
 f_handler.setLevel(logging.INFO)
