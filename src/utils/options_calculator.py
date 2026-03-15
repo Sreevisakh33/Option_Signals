@@ -96,6 +96,16 @@ class OptionsCalculator:
             ce_ask = row.get("CE_Ask", "-")
             pe_ltp = row.get("PE_LTP", "-")
             pe_ask = row.get("PE_Ask", "-")
+            
+            # Redact expensive premiums to force LLM constraint
+            MAX_PREMIUM = 180.0
+            if isinstance(ce_ltp, (int, float)) and ce_ltp > MAX_PREMIUM:
+                ce_ltp = ">180 (INVALID)"
+                ce_ask = ">180"
+            if isinstance(pe_ltp, (int, float)) and pe_ltp > MAX_PREMIUM:
+                pe_ltp = ">180 (INVALID)"
+                pe_ask = ">180"
+                
             ce_oi = row.get("CE_OI", "-")
             ce_coi = row.get("CE_COI", 0)
             pe_oi = row.get("PE_OI", "-")
