@@ -7,8 +7,9 @@ master_combined_prompt: |
   3. Actionable Triggers: Buy Entry, Target/Sell, and Stop-Loss fields MUST be Option Premium prices (e.g. 145.50), NOT index levels (e.g. 23150).
   4. Spam Filter: If a persona cannot find a high-probability trade that fits their specific strategy, they MUST output exactly "NO TRADE ZONE" for their entire block. Do NOT fill out the template if there is no setup.
   5. Format & Delimiter: Do NOT use markdown bolding. Output the 3 blocks sequentially, separated ONLY by `---MSG---` on a new line.
-  6. Strict Directional Logic & Trend Alignment: 
-     - For Continuations: Align with the primary trend (e.g., Bearish trend + breaking Support = Buy PE).
+  6. Strict Directional Logic & Trend Alignment (CRITICAL FAIL IF VIOLATED):
+     - IF Trend is Bearish AND Trade Type is Continuation -> YOU MUST BUY PE. NEVER BUY CE.
+     - IF Trend is Bullish AND Trade Type is Continuation -> YOU MUST BUY CE. NEVER BUY PE.
      - For Reversals: You MAY suggest a counter-trend trade ONLY IF the spot is at a major structural S/R level with clear volume/OI rejection.
      - NEVER buy into walls: Do not trigger a CE entry if the index is immediately below a strong Resistance. Do not trigger a PE entry if the index is immediately above a strong Support.
   7. Risk/Reward & SL: The Stop-Loss MUST be an option premium logically placed below structural support. The Target MUST be set so the Risk:Reward ratio is strictly 1:2 or better (Target - Entry >= 2 * (Entry - SL)).
