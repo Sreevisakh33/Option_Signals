@@ -121,17 +121,17 @@ class NiftyOptionsAgent(BaseAgent):
             logger.info("Executing master combined strategy query...")
             combined_response = self.run_strategy(chain_text, chart_paths, prompt_name="master_combined_prompt")
             
-            # Step 4: Split and Broadcast
-            if "---END_OF_SIGNAL_1---" in combined_response:
-                main_signal, breakout_signal = combined_response.split("---END_OF_SIGNAL_1---", 1)
+            # Step 4: Split & Broadcast
+            # The AI returns up to 5 blocks separated by ---MSG---
+            blocks = combined_response.split("---MSG---")
+            
+            for block in blocks:
+                cleaned_block = block.strip()
+                if not cleaned_block:
+                    continue
                 
-                # Clean up whitespace and broadcast
-                TelegramNotifier.send_alert(f"📊 NIFTY TRADING SIGNAL\n\n{main_signal.strip()}")
-                TelegramNotifier.send_alert(breakout_signal.strip())
-            else:
-                # Fallback if something went wrong with the split logic
-                logger.warning("Combined response did not contain expected delimiter. Sending as raw.")
-                TelegramNotifier.send_alert(combined_response)
+                # Broadcast message
+                TelegramNotifier.send_alert(cleaned_block)
             
             logger.info("--- Nifty Options Agent Completed ---")
             

@@ -44,7 +44,7 @@ def load_prompt(prompt_name: str = "system_prompt") -> str:
     yaml_path = CONFIG_DIR / "prompts.yaml"
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
-            prompts = yaml.safe_load(f)
+            prompts = yaml.safe_load(f) or {}
             return prompts.get(prompt_name, "")
     except Exception as e:
         print(f"Error loading prompt: {e}")
