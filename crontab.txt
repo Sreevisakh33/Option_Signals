@@ -1,0 +1,18 @@
+# Option_Signals Execution Schedule (IST)
+# Format: minute hour day_of_month month day_of_week command
+
+# --- Morning Signals ---
+15 9 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+30 9 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+45 9 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+00 10 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+15 10 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+
+# --- Afternoon Signals ---
+15 13 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+30 13 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+45 13 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+00 14 * * 1-5 /bin/bash /home/ubuntu/Option_Signals/run_bot.sh >> /home/ubuntu/Option_Signals/app.log 2>&1
+
+# --- End of Day Evaluator ---
+15 15 * * 1-5 /home/ubuntu/Option_Signals/venv/bin/python /home/ubuntu/Option_Signals/src/evaluator/paper_evaluator.py >> /home/ubuntu/Option_Signals/evaluator.log 2>&1
