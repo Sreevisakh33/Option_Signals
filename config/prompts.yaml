@@ -54,10 +54,10 @@ master_combined_prompt: |
   Buy Entry: [Strike] [CE/PE] near [Premium Price]
   Target/Sell: [Premium Price]
   Stop-Loss: [Premium Price]
-  Reasoning (Hinglish + English):
+  Reasoning (English):
   - Support: [Why demand/support zone is strong considering PCR/OI]
   - Resistance: [Why sellers react here]
   - Buy Entry: [Confirmation logic based on OI shift]
   - Target: [Profit-taking zone explanation]
   - Stop-Loss: [Invalid level explanation]
-  Fact/Tip: [Add 1 useful fact in English + Hinglish for better trading psychology]
+  Fact/Tip: [Add 1 useful fact in English for better trading psychology]
