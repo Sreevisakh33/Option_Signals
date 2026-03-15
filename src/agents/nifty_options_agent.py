@@ -2,10 +2,13 @@ import time
 import base64
 import shutil
 import json
+import re
+import csv
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI
 from src.core.agent import BaseAgent
-from src.utils.settings import OPENAI_API_KEY, load_prompt, DOWNLOAD_DIR, ARCHIVE_DIR
+from src.utils.settings import OPENAI_API_KEY, load_prompt, DOWNLOAD_DIR, ARCHIVE_DIR, BASE_DIR
 from src.utils.options_calculator import OptionsCalculator
 from src.tools.nse_fetcher import NSEFetcher
 from src.tools.tv_fetcher import TradingViewFetcher
@@ -122,13 +125,19 @@ class NiftyOptionsAgent(BaseAgent):
             combined_response = self.run_strategy(chain_text, chart_paths, prompt_name="master_combined_prompt")
             
             # Step 4: Split & Broadcast
-            # The AI returns up to 5 blocks separated by ---MSG---
+            # The AI returns up to 3 blocks separated by ---MSG---
             blocks = combined_response.split("---MSG---")
             
-            for block in blocks:
+            personas = ["Breakout Analyst", "Scalping Specialist", "Options Strategist"]
+            
+            for i, block in enumerate(blocks):
                 cleaned_block = block.strip()
                 if not cleaned_block:
                     continue
+                
+                # Log for paper trading evaluator
+                if i < len(personas):
+                    self.parse_and_log_signal(cleaned_block, personas[i])
                 
                 # Broadcast message
                 TelegramNotifier.send_alert(cleaned_block)
@@ -139,6 +148,46 @@ class NiftyOptionsAgent(BaseAgent):
             logger.error("Fatal error in agent execution: %s", e)
         finally:
             self.archive_downloads()
+
+    def parse_and_log_signal(self, block_text: str, persona: str):
+        """Parses the text block to extract trade details and logs to CSV."""
+        if "NO TRADE ZONE" in block_text.upper():
+            return
+            
+        try:
+            # Extract instrument: look for 5 digits followed by CE/PE
+            instrument_match = re.search(r"Buy Entry:\s*(\d{5}\s*(?:CE|PE))", block_text, re.IGNORECASE)
+            # Extract price levels
+            entry_match = re.search(r"Buy Entry:.*?(?:above|near)\s*([\d\.]+)", block_text, re.IGNORECASE)
+            target_match = re.search(r"Target/Sell:\s*([\d\.]+)", block_text, re.IGNORECASE)
+            sl_match = re.search(r"Stop-Loss:\s*([\d\.]+)", block_text, re.IGNORECASE)
+            
+            if instrument_match and entry_match and target_match and sl_match:
+                instrument = f"NIFTY {instrument_match.group(1).strip().upper()}"
+                entry_price = float(entry_match.group(1))
+                target_price = float(target_match.group(1))
+                sl_price = float(sl_match.group(1))
+                
+                # Append to CSV
+                log_dir = BASE_DIR / "logs"
+                log_dir.mkdir(exist_ok=True)
+                csv_path = log_dir / "paper_trades.csv"
+                
+                file_exists = csv_path.exists()
+                with open(csv_path, "a", newline="") as f:
+                    writer = csv.writer(f)
+                    if not file_exists:
+                        writer.writerow(["Timestamp", "Persona", "Instrument", "Entry_Price", "Target", "Stop_Loss", "Status"])
+                    
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    writer.writerow([timestamp, persona, instrument, entry_price, target_price, sl_price, "PENDING"])
+                    
+                logger.info("Logged PENDING paper trade: [%s] %s | Entry: %s | Tgt: %s | SL: %s", 
+                            persona, instrument, entry_price, target_price, sl_price)
+            else:
+                logger.debug("Could not parse all required fields for paper trade logging in block: %s...", block_text[:50])
+        except Exception as e:
+            logger.error("Error parsing signal for paper trading: %s", e)
 
     def archive_downloads(self):
         """
