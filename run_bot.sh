@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Automatically use the virtual environment to run the bot
+source venv/bin/activate
+python3 src/main.py

@@ -1,0 +1,8 @@
+playwright
+pandas
+requests
+pillow
+openai
+urllib3<2
+python-dotenv
+pyyaml

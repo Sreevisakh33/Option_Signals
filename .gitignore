@@ -1,0 +1,14 @@
+# Environments
+.env
+venv/
+__pycache__/
+*.pyc
+.tv_storage_state.json
+
+# Data & Output
+*.png
+*.csv
+*.json
+*.html
+market_snapshots/
+snapshots_archive/
