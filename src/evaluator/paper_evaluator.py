@@ -41,11 +41,32 @@ class PaperEvaluator:
         )
         logger.info("FyersModel initialized for evaluation.")
 
-    def format_fyers_symbol(self, instrument_str: str) -> str:
+    def get_expiry_details(self, date_obj):
+        """Calculates next Thursday (Weekly) and last Thursday (Monthly) for symbols."""
+        # Next Thursday
+        days_ahead = 3 - date_obj.weekday()
+        if days_ahead < 0:
+            days_ahead += 7
+        next_thursday = date_obj + timedelta(days=days_ahead)
+        
+        # Monthly symbol formatting
+        year_2digit = str(next_thursday.year)[-2:]
+        month_name = next_thursday.strftime("%b").upper()
+        
+        # Weekly month code (1-9, O, N, D)
+        m = next_thursday.month
+        month_code = str(m) if m <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m)]
+        day_str = next_thursday.strftime("%d")
+        
+        return {
+            "weekly": f"{year_2digit}{month_code}{day_str}",
+            "monthly": f"{year_2digit}{month_name}"
+        }
+
+    def format_fyers_symbol(self, instrument_str: str, trade_date: datetime) -> str:
         """
         Converts 'NIFTY 23150 CE' to Fyers format.
-        Assuming current month expiry for simplicity in this paper evaluator.
-        Example Fyers format: 'NSE:NIFTY26MAR23150CE'
+        Logic: Try Weekly first, fall back to Monthly if requested or if weekly fails.
         """
         parts = instrument_str.split()
         if len(parts) != 3 or parts[0] != "NIFTY":
@@ -54,14 +75,10 @@ class PaperEvaluator:
         strike = parts[1]
         opt_type = parts[2]
         
-        # Determine Current Month and Year for Fyers Symbol
-        now = datetime.now()
-        year_str = str(now.year)[-2:]
-        month_str = now.strftime("%b").upper()
+        expiry = self.get_expiry_details(trade_date)
         
-        # Construct Symbol (Approximation for current month expiry)
-        # Note: In a production environment, you would map this to the exact weekly expiry
-        fyers_symbol = f"NSE:NIFTY{year_str}{month_str}{strike}{opt_type}"
+        # Defaulting to Weekly format as it is most common for these signals
+        fyers_symbol = f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}"
         return fyers_symbol
 
     def fetch_historical_data(self, fyers_symbol: str, start_time: datetime):
@@ -103,20 +120,27 @@ class PaperEvaluator:
         and subsequently if Target or SL was hit.
         """
         status = row["Status"]
-        entry_price = float(row["Entry_Price"])
-        target = float(row["Target"])
-        sl = float(row["Stop_Loss"])
+        try:
+            entry_price = float(row["Entry_Price"])
+            target = float(row["Target"])
+            sl = float(row["Stop_Loss"])
+        except ValueError:
+            return "INVALID"
+            
+        if entry_price <= 0:
+            return "NO_SIGNAL"
         
         for candle in valid_candles:
             timestamp, open_p, high_p, low_p, close_p, vol = candle
             
             # Phase 1: Waiting for Entry
             if status == "PENDING":
-                # Did it breach the entry price during this 5m candle?
-                if low_p <= entry_price <= high_p or open_p >= entry_price:
+                # Check if price touched the entry level
+                # For a buy signal, we check if high >= entry (did it reach the entry?)
+                # Actually, many signals say 'Buy above X'. So we check if high_p >= entry_price.
+                if high_p >= entry_price:
                     status = "ACTIVE"
-                    # If it activates in the same candle, we must check if SL/Target also hit in this candle.
-                    # We assume worst case: SL hit before Target if both are within the candle range.
+                    # Optimization: Check if SL or Target hit in the same candle
                     if low_p <= sl:
                         status = "HIT_SL"
                         break
@@ -133,10 +157,6 @@ class PaperEvaluator:
                     status = "HIT_TARGET"
                     break
                     
-        # EOD Check
-        if status == "ACTIVE":
-            status = "EOD_OPEN"
-            
         return status
 
     def run_eod_evaluation(self):
@@ -148,40 +168,73 @@ class PaperEvaluator:
         logger.info("Starting End-of-Day Paper Trade Evaluation...")
         
         updated_rows = []
-        stats = {"HIT_TARGET": 0, "HIT_SL": 0, "EOD_OPEN": 0, "STILL_PENDING": 0}
+        stats = {"HIT_TARGET": 0, "HIT_SL": 0, "EOD_OPEN": 0, "STILL_PENDING": 0, "NO_SIGNAL": 0}
         
         try:
             with open(CSV_PATH, "r") as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
+                fieldnames = list(reader.fieldnames)
+                if "Result" not in fieldnames:
+                    fieldnames.append("Result")
                 
                 for row in reader:
-                    # Only evaluate trades from TODAY that aren't already closed
+                    # Initialize Result if not present
+                    if "Result" not in row:
+                        row["Result"] = ""
+
                     trade_time = datetime.strptime(row["Timestamp"], "%Y-%m-%d %H:%M:%S")
-                    is_today = trade_time.date() == datetime.now().date()
                     
-                    if is_today and row["Status"] in ["PENDING", "ACTIVE"]:
-                        symbol = self.format_fyers_symbol(row["Instrument"])
-                        logger.info(f"Evaluating: {row['Persona']} -> {symbol}")
+                    if row["Status"] in ["PENDING", "ACTIVE"]:
+                        expiry = self.get_expiry_details(trade_time)
                         
-                        candles = self.fetch_historical_data(symbol, trade_time)
+                        try:
+                            strike = row["Instrument"].split()[1]
+                            opt_type = row["Instrument"].split()[2]
+                        except (IndexError, AttributeError):
+                            row["Status"] = "INVALID_INST"
+                            updated_rows.append(row)
+                            continue
+
+                        # Try Weekly first
+                        symbol_w = f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}"
+                        logger.info(f"Evaluating: {row['Persona']} -> {symbol_w} (Logged: {row['Timestamp']})")
+                        
+                        candles = self.fetch_historical_data(symbol_w, trade_time)
+                        
+                        # Fallback to Monthly if Weekly fails
+                        if not candles:
+                            symbol_m = f"NSE:NIFTY{expiry['monthly']}{strike}{opt_type}"
+                            logger.info(f"Weekly failed. Trying Monthly: {symbol_m}")
+                            candles = self.fetch_historical_data(symbol_m, trade_time)
+                            symbol = symbol_m
+                        else:
+                            symbol = symbol_w
+
                         if candles:
                             new_status = self.evaluate_trade(row, candles)
                             row["Status"] = new_status
                             
-                            # Track stats
-                            if new_status == "HIT_TARGET": stats["HIT_TARGET"] += 1
-                            elif new_status == "HIT_SL": stats["HIT_SL"] += 1
-                            elif new_status == "EOD_OPEN": stats["EOD_OPEN"] += 1
-                            elif new_status == "PENDING": stats["STILL_PENDING"] += 1
+                            # Update Result
+                            if new_status == "HIT_TARGET":
+                                row["Result"] = "PROFIT"
+                                stats["HIT_TARGET"] += 1
+                            elif new_status == "HIT_SL":
+                                row["Result"] = "LOSS"
+                                stats["HIT_SL"] += 1
+                            elif new_status == "ACTIVE":
+                                stats["EOD_OPEN"] += 1
+                            elif new_status == "PENDING":
+                                stats["STILL_PENDING"] += 1
+                            elif new_status == "NO_SIGNAL":
+                                stats["NO_SIGNAL"] += 1
                             
                             logger.info(f"Result for {symbol}: {new_status}")
                         else:
-                            logger.warning(f"No valid candles found for {symbol} after {trade_time}. Skipping.")
+                            logger.warning(f"No data found for {symbol_w} or {expiry['monthly']} since {row['Timestamp']}")
                     
                     updated_rows.append(row)
                     
-            # Rewrite CSV with updated statuses
+            # Rewrite CSV with updated statuses and Result column
             tmp_path = CSV_PATH.with_suffix(".tmp")
             with open(tmp_path, "w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -193,17 +246,18 @@ class PaperEvaluator:
             
             # Print Summary Report
             print("\n" + "="*50)
-            print("📊 DAILY PAPER TRADING REPORT")
+            print("📊 CUMULATIVE PAPER TRADING REPORT")
             print("="*50)
             print(f"✅ Targets Hit : {stats['HIT_TARGET']}")
             print(f"❌ Stop Losses : {stats['HIT_SL']}")
             print(f"⏳ Left Open   : {stats['EOD_OPEN']}")
             print(f"💤 Never Trig. : {stats['STILL_PENDING']}")
+            print(f"🚫 No Signals  : {stats['NO_SIGNAL']}")
             print("="*50 + "\n")
             logger.info("Evaluation Complete.")
 
         except Exception as e:
-            logger.error(f"Error during EOD evaluation: {e}")
+            logger.error(f"Error during evaluation: {e}")
 
 if __name__ == "__main__":
     evaluator = PaperEvaluator()
