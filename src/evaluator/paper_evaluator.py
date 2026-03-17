@@ -42,7 +42,13 @@ class PaperEvaluator:
         logger.info("FyersModel initialized for evaluation.")
 
     def get_expiry_details(self, date_obj):
-        """Calculates next Thursday (Weekly) and last Thursday (Monthly) for symbols."""
+        """Calculates Today, next Thursday (Weekly) and last Thursday (Monthly) for symbols."""
+        # Symbol format for Today (useful if today is expiry)
+        today_year_2digit = str(date_obj.year)[-2:]
+        m_today = date_obj.month
+        today_month_code = str(m_today) if m_today <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m_today)]
+        today_day_str = date_obj.strftime("%d")
+
         # Next Thursday
         days_ahead = 3 - date_obj.weekday()
         if days_ahead < 0:
@@ -50,7 +56,7 @@ class PaperEvaluator:
         next_thursday = date_obj + timedelta(days=days_ahead)
         
         # Monthly symbol formatting
-        year_2digit = str(next_thursday.year)[-2:]
+        month_year_2digit = str(next_thursday.year)[-2:]
         month_name = next_thursday.strftime("%b").upper()
         
         # Weekly month code (1-9, O, N, D)
@@ -59,8 +65,9 @@ class PaperEvaluator:
         day_str = next_thursday.strftime("%d")
         
         return {
-            "weekly": f"{year_2digit}{month_code}{day_str}",
-            "monthly": f"{year_2digit}{month_name}"
+            "today": f"{today_year_2digit}{today_month_code}{today_day_str}",
+            "weekly": f"{month_year_2digit}{month_code}{day_str}",
+            "monthly": f"{month_year_2digit}{month_name}"
         }
 
     def format_fyers_symbol(self, instrument_str: str, trade_date: datetime) -> str:
@@ -103,8 +110,9 @@ class PaperEvaluator:
             response = self.fyers.history(data=data)
             if response.get("s") == "ok":
                 candles = response.get("candles", [])
-                # Filter candles strictly AFTER the signal was generated
-                start_epoch = int(start_time.timestamp())
+                # Filter candles starting from the BEGINNING of the 5m candle where signal occurred
+                # Subtracting 300 seconds to ensure we capture the full 5m block containing start_time
+                start_epoch = int(start_time.timestamp()) - 300
                 valid_candles = [c for c in candles if c[0] >= start_epoch]
                 return valid_candles
             else:
@@ -186,22 +194,24 @@ class PaperEvaluator:
                             updated_rows.append(row)
                             continue
 
-                        # Try Weekly first
-                        symbol_w = f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}"
-                        logger.info(f"Evaluating: {row['Persona']} -> {symbol_w} (Logged: {row['Timestamp']})")
+                        # Order of Trial: Today's Expiry -> Next Weekly (Thursday) -> Monthly
+                        symbols_to_try = [
+                            f"NSE:NIFTY{expiry['today']}{strike}{opt_type}",
+                            f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}",
+                            f"NSE:NIFTY{expiry['monthly']}{strike}{opt_type}"
+                        ]
                         
-                        candles = self.fetch_historical_data(symbol_w, trade_time)
+                        candles = []
+                        symbol_hit = ""
+                        for sym in symbols_to_try:
+                            logger.info(f"Trying symbol: {sym}")
+                            candles = self.fetch_historical_data(sym, trade_time)
+                            if candles:
+                                symbol_hit = sym
+                                break
                         
-                        # Fallback to Monthly if Weekly fails
-                        if not candles:
-                            symbol_m = f"NSE:NIFTY{expiry['monthly']}{strike}{opt_type}"
-                            logger.info(f"Weekly failed. Trying Monthly: {symbol_m}")
-                            candles = self.fetch_historical_data(symbol_m, trade_time)
-                            symbol = symbol_m
-                        else:
-                            symbol = symbol_w
-
                         if candles:
+                            logger.info(f"Data found for {symbol_hit}. Evaluating...")
                             new_status = self.evaluate_trade(row, candles)
                             row["Status"] = new_status
                             
