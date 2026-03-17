@@ -233,9 +233,9 @@ class PaperEvaluator:
                             elif new_status == "NO_SIGNAL":
                                 stats["NO_SIGNAL"] += 1
                             
-                            logger.info(f"Result for {symbol}: {new_status}")
+                            logger.info(f"Result for {symbol_hit}: {new_status}")
                         else:
-                            logger.warning(f"No data found for {symbol_w} or {expiry['monthly']} since {row['Timestamp']}")
+                            logger.warning(f"No data found for {symbols_to_try} since {row['Timestamp']}")
                     
                     updated_rows.append(row)
                     
