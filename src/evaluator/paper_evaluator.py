@@ -130,26 +130,17 @@ class PaperEvaluator:
         if entry_price <= 0:
             return "NO_SIGNAL"
         
+        # Market Order Logic: If we have candles, the trade is triggered immediately 
+        # at the logged entry price (which is the LTP at the time of signal).
+        if status == "PENDING" and valid_candles:
+            status = "ACTIVE"
+            # We check the first candle for immediate SL/Target hits too
+        
         for candle in valid_candles:
             timestamp, open_p, high_p, low_p, close_p, vol = candle
             
-            # Phase 1: Waiting for Entry
-            if status == "PENDING":
-                # Check if price touched the entry level
-                # For a buy signal, we check if high >= entry (did it reach the entry?)
-                # Actually, many signals say 'Buy above X'. So we check if high_p >= entry_price.
-                if high_p >= entry_price:
-                    status = "ACTIVE"
-                    # Optimization: Check if SL or Target hit in the same candle
-                    if low_p <= sl:
-                        status = "HIT_SL"
-                        break
-                    elif high_p >= target:
-                        status = "HIT_TARGET"
-                        break
-                        
-            # Phase 2: Trade is Active, looking for Exit
-            elif status == "ACTIVE":
+            # Trade is Active, looking for Exit
+            if status == "ACTIVE":
                 if low_p <= sl:
                     status = "HIT_SL"
                     break
