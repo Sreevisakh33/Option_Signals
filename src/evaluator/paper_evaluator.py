@@ -140,7 +140,7 @@ class PaperEvaluator:
         
         # Immediate Breach Check: Was SL or Target already hit at the moment of logging?
         # (Using the logged entry price which is the LTP at signal time)
-        if status == "PENDING":
+        if status in ["PENDING", "ERROR"]:
             if entry_price <= sl:
                 return "HIT_SL"
             if entry_price >= target:
@@ -205,11 +205,13 @@ class PaperEvaluator:
                             f"NSE:NIFTY{expiry['monthly']}{strike}{opt_type}"
                         ]
                         
-                        candles = []
+                        import time
+                        
                         symbol_hit = ""
                         data_fetch_error = False
                         
                         for sym in symbols_to_try:
+                            time.sleep(0.5) # Avoid Fyers rate limit (429 error)
                             logger.info(f"Trying symbol: {sym}")
                             # Directly calling fyers.history to check for specific error codes
                             data = {
@@ -253,6 +255,9 @@ class PaperEvaluator:
                             elif new_status == "HIT_SL":
                                 row["Result"] = "LOSS"
                                 stats["HIT_SL"] += 1
+                            elif new_status == "ERROR":
+                                row["Result"] = "EVAL_ERROR"
+                                stats["ERROR"] += 1
                             elif new_status == "ACTIVE":
                                 stats["EOD_OPEN"] += 1
                             elif new_status == "PENDING":
