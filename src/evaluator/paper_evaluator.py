@@ -138,24 +138,28 @@ class PaperEvaluator:
         if entry_price <= 0:
             return "NO_SIGNAL"
         
-        # Market Order Logic: If we have candles, the trade is triggered immediately 
-        # at the logged entry price (which is the LTP at the time of signal).
-        if status == "PENDING" and valid_candles:
-            status = "ACTIVE"
-            # We check the first candle for immediate SL/Target hits too
+        # Immediate Breach Check: Was SL or Target already hit at the moment of logging?
+        # (Using the logged entry price which is the LTP at signal time)
+        if status == "PENDING":
+            if entry_price <= sl:
+                return "HIT_SL"
+            if entry_price >= target:
+                return "HIT_TARGET"
+            
+            if valid_candles:
+                status = "ACTIVE"
         
         for candle in valid_candles:
             timestamp, open_p, high_p, low_p, close_p, vol = candle
             
             # Trade is Active, looking for Exit
             if status == "ACTIVE":
+                # CONSERVATIVE RULE: If both hit in the same candle, assume SL hit FIRST.
                 if low_p <= sl:
                     status = "HIT_SL"
                     break
                 elif high_p >= target:
                     status = "HIT_TARGET"
-                    break
-                    
         return status
 
     def run_eod_evaluation(self):
