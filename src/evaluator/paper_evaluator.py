@@ -171,7 +171,7 @@ class PaperEvaluator:
         logger.info("Starting End-of-Day Paper Trade Evaluation...")
         
         updated_rows = []
-        stats = {"HIT_TARGET": 0, "HIT_SL": 0, "EOD_OPEN": 0, "STILL_PENDING": 0, "NO_SIGNAL": 0}
+        stats = {"HIT_TARGET": 0, "HIT_SL": 0, "EOD_OPEN": 0, "STILL_PENDING": 0, "NO_SIGNAL": 0, "ERROR": 0}
         
         try:
             with open(CSV_PATH, "r") as f:
@@ -187,7 +187,7 @@ class PaperEvaluator:
 
                     trade_time = datetime.strptime(row["Timestamp"], "%Y-%m-%d %H:%M:%S")
                     
-                    if row["Status"] in ["PENDING", "ACTIVE"]:
+                    if row["Status"] in ["PENDING", "ACTIVE", "ERROR"]:
                         expiry = self.get_expiry_details(trade_time)
                         
                         try:
@@ -207,11 +207,38 @@ class PaperEvaluator:
                         
                         candles = []
                         symbol_hit = ""
+                        data_fetch_error = False
+                        
                         for sym in symbols_to_try:
                             logger.info(f"Trying symbol: {sym}")
-                            candles = self.fetch_historical_data(sym, trade_time)
-                            if candles:
-                                symbol_hit = sym
+                            # Directly calling fyers.history to check for specific error codes
+                            data = {
+                                "symbol": sym,
+                                "resolution": "5",
+                                "date_format": "1",
+                                "range_from": trade_time.strftime("%Y-%m-%d"),
+                                "range_to": datetime.now().strftime("%Y-%m-%d"),
+                                "cont_flag": "1"
+                            }
+                            try:
+                                response = self.fyers.history(data=data)
+                                if response.get("s") == "ok":
+                                    all_candles = response.get("candles", [])
+                                    # Include inception candle
+                                    start_epoch = int(trade_time.timestamp()) - 300
+                                    candles = [c for c in all_candles if c[0] >= start_epoch]
+                                    if candles:
+                                        symbol_hit = sym
+                                        break
+                                elif response.get("code") in [-300, -16]: # Invalid symbol or auth error
+                                    continue
+                                else:
+                                    logger.warning(f"API Error for {sym}: {response.get('message')}")
+                                    data_fetch_error = True
+                                    break
+                            except Exception as e:
+                                logger.error(f"Exc fetching {sym}: {e}")
+                                data_fetch_error = True
                                 break
                         
                         if candles:
@@ -234,8 +261,13 @@ class PaperEvaluator:
                                 stats["NO_SIGNAL"] += 1
                             
                             logger.info(f"Result for {symbol_hit}: {new_status}")
+                        elif data_fetch_error:
+                            row["Status"] = "ERROR"
+                            row["Result"] = "API_ERROR"
+                            stats["ERROR"] += 1
+                            logger.error(f"Set status to ERROR for {row['Instrument']} due to API issues.")
                         else:
-                            logger.warning(f"No data found for {symbols_to_try} since {row['Timestamp']}")
+                            logger.warning(f"No data found for symbols {symbols_to_try} since {row['Timestamp']}")
                     
                     updated_rows.append(row)
                     
@@ -258,6 +290,7 @@ class PaperEvaluator:
             print(f"⏳ Left Open   : {stats['EOD_OPEN']}")
             print(f"💤 Never Trig. : {stats['STILL_PENDING']}")
             print(f"🚫 No Signals  : {stats['NO_SIGNAL']}")
+            print(f"⚠️ Errors      : {stats['ERROR']}")
             print("="*50 + "\n")
             logger.info("Evaluation Complete.")
 
