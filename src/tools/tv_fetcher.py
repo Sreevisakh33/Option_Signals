@@ -143,9 +143,9 @@ class TradingViewFetcher:
                 page.close()
                 browser.close()
 
-        # Stitch all frames into one combined image and return it as a single-item list
+        # Stitch all frames for archiving/debugging, but return individual frames for AI analysis
         if individual_paths:
-            combined = TradingViewFetcher._stitch_charts(individual_paths, intervals)
-            return [combined]
+            TradingViewFetcher._stitch_charts(individual_paths, intervals)
+            return individual_paths
 
         return individual_paths
