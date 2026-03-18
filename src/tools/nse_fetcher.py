@@ -1,3 +1,4 @@
+from datetime import datetime
 from playwright.sync_api import sync_playwright
 from src.utils.settings import NSE_OC_URL
 from src.utils.logger_config import get_logger
@@ -74,7 +75,6 @@ class NSEFetcher:
                         json_data = response.json()
                         
                         # VALIDATE TIMESTAMP
-                        from datetime import datetime
                         ts_str = json_data.get("records", {}).get("timestamp", "")
                         
                         if ts_str:
