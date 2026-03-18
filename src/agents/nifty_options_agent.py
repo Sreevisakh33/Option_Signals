@@ -116,6 +116,10 @@ class NiftyOptionsAgent(BaseAgent):
             if not json_data:
                 logger.error("Failed to acquire json data. Exiting pipeline.")
                 return
+            
+            # Log Data Freshness
+            nse_ts = json_data.get("records", {}).get("timestamp", "Unknown")
+            logger.info(f">>> DATA SNAPSHOT: NSE Timestamp: {nse_ts} | Spot: {spot_price}")
 
             # Step 2: Calculate Max Pain, PCR, and Format Data
             chain_text = self.process_data(json_data, spot_price)

@@ -12,9 +12,11 @@ class NSEFetcher:
         """
         Navigates to the NSE Option Chain and intercepts the background JSON API request.
         Returns the parsed JSON dictionary and the underlying Spot Price.
+        Includes retry logic to ensure data is not stale.
         """
         json_data = None
         spot_price = None
+        max_attempts = 3
 
         with sync_playwright() as p:
             logger.info("Launching headless Chromium browser for NSE...")
@@ -43,33 +45,66 @@ class NSEFetcher:
             """)
 
             page = context.new_page()
-            try:
-                # Use expect_response with a more specific filter to ensure we get the full data
-                def is_full_data(response):
-                    if "api/option-chain" in response.url and "NIFTY" in response.url and response.status == 200:
-                        try:
-                            data = response.json()
-                            return "records" in data and "data" in data["records"]
-                        except:
-                            return False
-                    return False
-
-                with page.expect_response(is_full_data, timeout=45000) as response_info:
-                    logger.info("Navigating to NSE Option Chain: %s", NSE_OC_URL)
-                    page.goto(NSE_OC_URL, wait_until="load", timeout=60000)
+            
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    logger.info(f"Acquisition Attempt {attempt}/{max_attempts}...")
                     
-                    # Capture the data
-                    response = response_info.value
-                    json_data = response.json()
-                    logger.info("Intercepted full NSE API response successfully.")
-                    
-                    if "records" in json_data and "underlyingValue" in json_data["records"]:
-                        spot_price = json_data["records"]["underlyingValue"]
+                    # Use expect_response with a more specific filter to ensure we get the full data
+                    def is_full_data(response):
+                        if "api/option-chain" in response.url and "NIFTY" in response.url and response.status == 200:
+                            try:
+                                data = response.json()
+                                return "records" in data and "data" in data["records"]
+                            except:
+                                return False
+                        return False
 
-            except Exception as e:
-                logger.error("Error acquiring NSE Option Chain: %s", e)
-            finally:
-                page.close()
-                browser.close()
+                    # We clear cookies/cache on retry to be safe
+                    if attempt > 1:
+                        context.clear_cookies()
+
+                    with page.expect_response(is_full_data, timeout=45000) as response_info:
+                        logger.info("Navigating to NSE Option Chain: %s", NSE_OC_URL)
+                        # Adding a timestamp-based query param to bypass some caches
+                        page.goto(f"{NSE_OC_URL}?refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
+                        
+                        # Capture the data
+                        response = response_info.value
+                        json_data = response.json()
+                        
+                        # VALIDATE TIMESTAMP
+                        from datetime import datetime
+                        ts_str = json_data.get("records", {}).get("timestamp", "")
+                        
+                        if ts_str:
+                            # Format: "18-Mar-2026 10:20:00"
+                            try:
+                                data_date = datetime.strptime(ts_str.split()[0], "%d-%b-%Y").date()
+                                today_date = datetime.now().date()
+                                
+                                if data_date < today_date:
+                                    logger.warning(f"Detected STALE data! Data Date: {data_date} | Today: {today_date}. Refreshing...")
+                                    continue # Try again
+                                else:
+                                    logger.info(f"Intercepted FRESH NSE API response: {ts_str}")
+                                    break # Success
+                            except Exception as parse_err:
+                                logger.error(f"Error parsing NSE timestamp '{ts_str}': {parse_err}")
+                        
+                        if "records" in json_data and "underlyingValue" in json_data["records"]:
+                            spot_price = json_data["records"]["underlyingValue"]
+                            break # Assume success if no timestamp but we have data (fallback)
+
+                except Exception as e:
+                    logger.error("Error acquiring NSE Option Chain on attempt %d: %s", attempt, e)
+                    if attempt == max_attempts:
+                        break
+            
+            if json_data and "records" in json_data and "underlyingValue" in json_data["records"]:
+                spot_price = json_data["records"]["underlyingValue"]
+
+            page.close()
+            browser.close()
 
         return json_data, spot_price
