@@ -49,20 +49,20 @@ class PaperEvaluator:
         today_month_code = str(m_today) if m_today <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m_today)]
         today_day_str = date_obj.strftime("%d")
 
-        # Next Thursday
-        days_ahead = 3 - date_obj.weekday()
+        # Next Tuesday (Nifty 50 moved to Tuesday expiries in 2026)
+        days_ahead = 1 - date_obj.weekday()
         if days_ahead < 0:
             days_ahead += 7
-        next_thursday = date_obj + timedelta(days=days_ahead)
+        next_tue = date_obj + timedelta(days=days_ahead)
         
         # Monthly symbol formatting
-        month_year_2digit = str(next_thursday.year)[-2:]
-        month_name = next_thursday.strftime("%b").upper()
+        month_year_2digit = str(next_tue.year)[-2:]
+        month_name = next_tue.strftime("%b").upper()
         
         # Weekly month code (1-9, O, N, D)
-        m = next_thursday.month
+        m = next_tue.month
         month_code = str(m) if m <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m)]
-        day_str = next_thursday.strftime("%d")
+        day_str = next_tue.strftime("%d")
         
         return {
             "today": f"{today_year_2digit}{today_month_code}{today_day_str}",

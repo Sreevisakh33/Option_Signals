@@ -25,10 +25,10 @@ class OptionsCalculator:
         Parses the JSON Option Chain to identify current Spot Price, locate ATM strike, 
         filter to ATM +/- 10 strikes, and format text strings.
         """
-        if not json_data or "records" not in json_data or "data" not in json_data["records"]:
+        if not json_data or "filtered" not in json_data or "data" not in json_data["filtered"]:
             raise ValueError("Invalid JSON data provided.")
             
-        records = json_data["records"]["data"]
+        records = json_data["filtered"]["data"]
         timestamp = json_data.get("records", {}).get("timestamp", "Unknown")
         self.logger.info("Processing NSE data with timestamp: %s", timestamp)
         
