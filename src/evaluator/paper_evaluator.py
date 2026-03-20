@@ -228,7 +228,7 @@ class PaperEvaluator:
                             logger.info(f"Trying symbol: {sym}")
                             data = {
                                 "symbol": sym,
-                                "resolution": "5",
+                                "resolution": "1",
                                 "date_format": "1",
                                 "range_from": trade_time.strftime("%Y-%m-%d"),
                                 "range_to": datetime.now().strftime("%Y-%m-%d"),
@@ -238,7 +238,8 @@ class PaperEvaluator:
                                 response = self.fyers.history(data=data)
                                 if response.get("s") == "ok":
                                     all_candles = response.get("candles", [])
-                                    start_epoch = int(trade_time.timestamp()) - 300
+                                    # Start evaluation strictly 1 minute AFTER signal to ensure logical Exit_Time
+                                    start_epoch = int(trade_time.timestamp()) + 60
                                     candles = [c for c in all_candles if c[0] >= start_epoch]
                                     if candles:
                                         symbol_hit = sym
