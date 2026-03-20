@@ -114,7 +114,7 @@ class NiftyOptionsAgent(BaseAgent):
             # Step 1: Collect Data
             json_data, chart_paths, spot_price = self.acquire_data()
             if not json_data:
-                logger.error("Failed to acquire json data. Exiting pipeline.")
+                logger.error("Failed to acquire live market data. Market may not be open yet (starts at 09:15 AM IST). Aborting for safety.")
                 return
             
             # Log Data Freshness
@@ -141,7 +141,8 @@ class NiftyOptionsAgent(BaseAgent):
                 
                 # Log for paper trading evaluator
                 if i < len(personas):
-                    self.parse_and_log_signal(cleaned_block, personas[i])
+                    nearest_expiry = json_data.get("records", {}).get("expiryDates", [""])[0]
+                    self.parse_and_log_signal(cleaned_block, personas[i], nearest_expiry)
                 
                 # Broadcast message
                 TelegramNotifier.send_alert(cleaned_block)
@@ -153,7 +154,7 @@ class NiftyOptionsAgent(BaseAgent):
         finally:
             self.archive_downloads()
 
-    def parse_and_log_signal(self, block_text: str, persona: str):
+    def parse_and_log_signal(self, block_text: str, persona: str, nearest_expiry: str = ""):
         """Parses the text block to extract trade details and logs to CSV."""
         if "NO TRADE ZONE" in block_text.upper():
             return
@@ -167,7 +168,18 @@ class NiftyOptionsAgent(BaseAgent):
             sl_match = re.search(r"Stop-Loss:\s*([\d\.]+)", block_text, re.IGNORECASE)
             
             if instrument_match and entry_match and target_match and sl_match:
-                instrument = f"NIFTY {instrument_match.group(1).strip().upper()}"
+                raw_instrument = instrument_match.group(1).strip().upper().replace(" ", "")
+                
+                # Format expiry: 24-Mar-2026 -> 24MAR
+                expiry_prefix = ""
+                if nearest_expiry:
+                    try:
+                        expiry_dt = datetime.strptime(nearest_expiry, "%d-%b-%Y")
+                        expiry_prefix = expiry_dt.strftime("%d%b").upper()
+                    except:
+                        expiry_prefix = nearest_expiry.split("-")[0] + nearest_expiry.split("-")[1].upper() if "-" in nearest_expiry else ""
+
+                instrument = f"NIFTY {expiry_prefix}{raw_instrument}"
                 entry_price = float(entry_match.group(1))
                 target_price = float(target_match.group(1))
                 sl_price = float(sl_match.group(1))

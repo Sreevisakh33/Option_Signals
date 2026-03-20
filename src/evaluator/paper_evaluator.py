@@ -206,9 +206,24 @@ class PaperEvaluator:
                         expiry = self.get_expiry_details(trade_time)
                         
                         try:
-                            strike = row["Instrument"].split()[1]
-                            opt_type = row["Instrument"].split()[2]
-                        except (IndexError, AttributeError):
+                            # Handling both formats:
+                            # New: NIFTY 24MAR23900CE (2 parts)
+                            # Old: NIFTY 23900 CE (3 parts)
+                            parts = row["Instrument"].split()
+                            if len(parts) == 3:
+                                strike = parts[1]
+                                opt_type = parts[2]
+                            else:
+                                # Regex to extract last 5 digits and type (CE/PE)
+                                combined = parts[1]
+                                match = re.search(r"(\d{5})(CE|PE)$", combined)
+                                if match:
+                                    strike = match.group(1)
+                                    opt_type = match.group(2)
+                                else:
+                                    raise ValueError(f"Could not parse instrument: {row['Instrument']}")
+                        except (IndexError, AttributeError, ValueError) as parse_err:
+                            logger.warning(f"Skipping row due to parse error: {parse_err}")
                             row["Status"] = "INVALID_INST"
                             results_to_save.append(row)
                             continue
