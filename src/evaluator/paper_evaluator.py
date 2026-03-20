@@ -241,6 +241,23 @@ class PaperEvaluator:
                                     # Start evaluation strictly 1 minute AFTER signal to ensure logical Exit_Time
                                     start_epoch = int(trade_time.timestamp()) + 60
                                     candles = [c for c in all_candles if c[0] >= start_epoch]
+                                    
+                                    # --- ENTRY MATCH GUARD ---
+                                    if candles:
+                                        first_candle_open = candles[0][1] # Open of first valid candle
+                                        try:
+                                            row_entry = float(row["Entry_Price"])
+                                        except:
+                                            row_entry = 0
+                                        
+                                        if row_entry > 0:
+                                            diff = abs(first_candle_open - row_entry) / row_entry
+                                            if diff > 0.15: # 15% tolerance
+                                                logger.warning(f"Price mismatch for {sym}: CSV={row_entry}, Market={first_candle_open} ({diff:.1%}). Skipping symbol.")
+                                                candles = []
+                                                continue
+                                    # --------------------------
+
                                     if candles:
                                         symbol_hit = sym
                                         break
