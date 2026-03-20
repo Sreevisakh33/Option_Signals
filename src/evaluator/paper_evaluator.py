@@ -126,67 +126,82 @@ class PaperEvaluator:
         """
         Steps through 5-min candles to see if Entry was hit, 
         and subsequently if Target or SL was hit.
+        Returns (status, exit_time).
         """
         status = row["Status"]
+        exit_time = ""
         try:
             entry_price = float(row["Entry_Price"])
             target = float(row["Target"])
             sl = float(row["Stop_Loss"])
         except ValueError:
-            return "INVALID"
+            return "INVALID", ""
             
         if entry_price <= 0:
-            return "NO_SIGNAL"
+            return "NO_SIGNAL", ""
         
         # Immediate Breach Check: Was SL or Target already hit at the moment of logging?
         # (Using the logged entry price which is the LTP at signal time)
         if status in ["PENDING", "ERROR"]:
             if entry_price <= sl:
-                return "HIT_SL"
+                return "HIT_SL", row["Timestamp"]
             if entry_price >= target:
-                return "HIT_TARGET"
+                return "HIT_TARGET", row["Timestamp"]
             
             if valid_candles:
                 status = "ACTIVE"
         
         for candle in valid_candles:
-            timestamp, open_p, high_p, low_p, close_p, vol = candle
+            epoch_ts, open_p, high_p, low_p, close_p, vol = candle
             
             # Trade is Active, looking for Exit
             if status == "ACTIVE":
                 # CONSERVATIVE RULE: If both hit in the same candle, assume SL hit FIRST.
                 if low_p <= sl:
                     status = "HIT_SL"
+                    exit_time = datetime.fromtimestamp(epoch_ts).strftime("%Y-%m-%d %H:%M:%S")
                     break
                 elif high_p >= target:
                     status = "HIT_TARGET"
-        return status
+                    exit_time = datetime.fromtimestamp(epoch_ts).strftime("%Y-%m-%d %H:%M:%S")
+                    break
+        return status, exit_time
 
     def run_eod_evaluation(self):
-        """Reads CSV, evaluates PENDING/ACTIVE trades, and rewrites CSV."""
+        """Reads CSV, evaluates trades, and writes results to a DAILY file."""
         if not CSV_PATH.exists():
             logger.info("No paper_trades.csv found. Nothing to evaluate.")
             return
 
-        logger.info("Starting End-of-Day Paper Trade Evaluation...")
+        # Generate today's result filename
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        RESULT_CSV_PATH = LOGS_DIR / f"result_{today_str}.csv"
         
-        updated_rows = []
+        logger.info(f"Starting End-of-Day Paper Trade Evaluation for {today_str}...")
+        logger.info(f"Output will be saved to: {RESULT_CSV_PATH.name}")
+        
+        results_to_save = []
         stats = {"HIT_TARGET": 0, "HIT_SL": 0, "EOD_OPEN": 0, "STILL_PENDING": 0, "NO_SIGNAL": 0, "ERROR": 0}
         
         try:
             with open(CSV_PATH, "r") as f:
                 reader = csv.DictReader(f)
                 fieldnames = list(reader.fieldnames)
+                
+                # Add new columns for the result file
                 if "Result" not in fieldnames:
                     fieldnames.append("Result")
+                if "Exit_Time" not in fieldnames:
+                    fieldnames.append("Exit_Time")
                 
                 for row in reader:
-                    # Initialize Result if not present
-                    if "Result" not in row:
-                        row["Result"] = ""
+                    # Initialize columns
+                    if "Result" not in row: row["Result"] = ""
+                    if "Exit_Time" not in row: row["Exit_Time"] = ""
 
                     trade_time = datetime.strptime(row["Timestamp"], "%Y-%m-%d %H:%M:%S")
                     
+                    # Log trial
                     if row["Status"] in ["PENDING", "ACTIVE", "ERROR"]:
                         expiry = self.get_expiry_details(trade_time)
                         
@@ -195,25 +210,22 @@ class PaperEvaluator:
                             opt_type = row["Instrument"].split()[2]
                         except (IndexError, AttributeError):
                             row["Status"] = "INVALID_INST"
-                            updated_rows.append(row)
+                            results_to_save.append(row)
                             continue
 
-                        # Order of Trial: Today's Expiry -> Next Weekly (Thursday) -> Monthly
                         symbols_to_try = [
                             f"NSE:NIFTY{expiry['today']}{strike}{opt_type}",
                             f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}",
                             f"NSE:NIFTY{expiry['monthly']}{strike}{opt_type}"
                         ]
                         
-                        import time
-                        
                         symbol_hit = ""
                         data_fetch_error = False
+                        candles = []
                         
                         for sym in symbols_to_try:
-                            time.sleep(0.5) # Avoid Fyers rate limit (429 error)
+                            time.sleep(0.5) # Avoid Fyers rate limit
                             logger.info(f"Trying symbol: {sym}")
-                            # Directly calling fyers.history to check for specific error codes
                             data = {
                                 "symbol": sym,
                                 "resolution": "5",
@@ -226,13 +238,12 @@ class PaperEvaluator:
                                 response = self.fyers.history(data=data)
                                 if response.get("s") == "ok":
                                     all_candles = response.get("candles", [])
-                                    # Include inception candle
                                     start_epoch = int(trade_time.timestamp()) - 300
                                     candles = [c for c in all_candles if c[0] >= start_epoch]
                                     if candles:
                                         symbol_hit = sym
                                         break
-                                elif response.get("code") in [-300, -16]: # Invalid symbol or auth error
+                                elif response.get("code") in [-300, -16]:
                                     continue
                                 else:
                                     logger.warning(f"API Error for {sym}: {response.get('message')}")
@@ -245,8 +256,9 @@ class PaperEvaluator:
                         
                         if candles:
                             logger.info(f"Data found for {symbol_hit}. Evaluating...")
-                            new_status = self.evaluate_trade(row, candles)
+                            new_status, exit_time = self.evaluate_trade(row, candles)
                             row["Status"] = new_status
+                            row["Exit_Time"] = exit_time
                             
                             # Update Result
                             if new_status == "HIT_TARGET":
@@ -265,30 +277,25 @@ class PaperEvaluator:
                             elif new_status == "NO_SIGNAL":
                                 stats["NO_SIGNAL"] += 1
                             
-                            logger.info(f"Result for {symbol_hit}: {new_status}")
+                            logger.info(f"Result for {symbol_hit}: {new_status} at {exit_time or 'N/A'}")
                         elif data_fetch_error:
                             row["Status"] = "ERROR"
                             row["Result"] = "API_ERROR"
                             stats["ERROR"] += 1
-                            logger.error(f"Set status to ERROR for {row['Instrument']} due to API issues.")
                         else:
-                            logger.warning(f"No data found for symbols {symbols_to_try} since {row['Timestamp']}")
+                            logger.warning(f"No data found for symbols {symbols_to_try}")
                     
-                    updated_rows.append(row)
+                    results_to_save.append(row)
                     
-            # Rewrite CSV with updated statuses and Result column
-            tmp_path = CSV_PATH.with_suffix(".tmp")
-            with open(tmp_path, "w", newline="") as f:
+            # Write to DAILY result file, NOT paper_trades.csv
+            with open(RESULT_CSV_PATH, "w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(updated_rows)
+                writer.writerows(results_to_save)
             
-            # Replace old file (atomic)
-            tmp_path.replace(CSV_PATH)
-            
-            # Print Summary Report
+            # Final Report
             print("\n" + "="*50)
-            print("📊 CUMULATIVE PAPER TRADING REPORT")
+            print(f"📊 PAPER TRADING REPORT - {today_str}")
             print("="*50)
             print(f"✅ Targets Hit : {stats['HIT_TARGET']}")
             print(f"❌ Stop Losses : {stats['HIT_SL']}")
@@ -297,7 +304,10 @@ class PaperEvaluator:
             print(f"🚫 No Signals  : {stats['NO_SIGNAL']}")
             print(f"⚠️ Errors      : {stats['ERROR']}")
             print("="*50 + "\n")
-            logger.info("Evaluation Complete.")
+            logger.info(f"Evaluation Complete. Results saved to {RESULT_CSV_PATH.name}")
+
+        except Exception as e:
+            logger.error(f"Error during evaluation: {e}")
 
         except Exception as e:
             logger.error(f"Error during evaluation: {e}")
