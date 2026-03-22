@@ -9,7 +9,7 @@ class NSEFetcher:
     """Handles fetching and intercepting the NSE Option Chain JSON API."""
 
     @staticmethod
-    def fetch_json() -> tuple[dict, float]:
+    def fetch_json(symbol: str = "NIFTY") -> tuple[dict, float]:
         """
         Navigates to the NSE Option Chain and intercepts the background JSON API request.
         Returns the parsed JSON dictionary and the underlying Spot Price.
@@ -53,7 +53,7 @@ class NSEFetcher:
                     
                     # Use expect_response with a more specific filter to ensure we get the full data
                     def is_full_data(response):
-                        if "api/option-chain" in response.url and "NIFTY" in response.url and response.status == 200:
+                        if "api/option-chain" in response.url and symbol.upper() in response.url and response.status == 200:
                             try:
                                 data = response.json()
                                 return "records" in data and "data" in data["records"]
@@ -66,9 +66,10 @@ class NSEFetcher:
                         context.clear_cookies()
 
                     with page.expect_response(is_full_data, timeout=45000) as response_info:
-                        logger.info("Navigating to NSE Option Chain: %s", NSE_OC_URL)
+                        target_url = f"{NSE_OC_URL}?symbol={symbol.upper()}"
+                        logger.info("Navigating to NSE Option Chain: %s", target_url)
                         # Adding a timestamp-based query param to bypass some caches
-                        page.goto(f"{NSE_OC_URL}?refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
+                        page.goto(f"{target_url}&refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
                         
                         # Capture the data
                         response = response_info.value

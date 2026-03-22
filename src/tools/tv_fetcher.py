@@ -32,7 +32,7 @@ class TradingViewFetcher:
             return False
 
     @staticmethod
-    def _stitch_charts(chart_paths: list[str], intervals: list[int]) -> str:
+    def _stitch_charts(chart_paths: list[str], intervals: list[int], symbol: str = "NIFTY") -> str:
         """Stitch individual chart images side-by-side with timeframe labels."""
         images = [Image.open(p) for p in chart_paths]
         label_h = 40
@@ -50,7 +50,7 @@ class TradingViewFetcher:
         x = 0
         for img, tf in zip(images, intervals):
             draw.rectangle([x, 0, x + img.width, label_h], fill=(30, 30, 30))
-            draw.text((x + 10, 10), f"  NIFTY  |  {tf} MIN", fill=(200, 200, 200), font=font)
+            draw.text((x + 10, 10), f"  {symbol.upper()}  |  {tf} MIN", fill=(200, 200, 200), font=font)
             combined.paste(img, (x, label_h))
             x += img.width
 
@@ -59,7 +59,7 @@ class TradingViewFetcher:
         return COMBINED_CHART_PATH
 
     @staticmethod
-    def capture_charts(intervals: list[int] = INTERVALS) -> list[str]:
+    def capture_charts(intervals: list[int] = INTERVALS, symbol: str = "NIFTY") -> list[str]:
         """
         Log in to TradingView, capture each timeframe in fullscreen mode
         (Shift+F hides sidebars), stitch all panes into one combined image,
@@ -108,7 +108,12 @@ class TradingViewFetcher:
                 logger.info("Authenticated via persistent session.")
 
                 for interval in intervals:
-                    url = f"{TRADINGVIEW_CHART_URL}&interval={interval}"
+                    # Replace NIFTY with BANKNIFTY in the URL if needed
+                    base_url = TRADINGVIEW_CHART_URL
+                    if "BANK" in symbol.upper():
+                         base_url = base_url.replace("NIFTY", "BANKNIFTY")
+                    
+                    url = f"{base_url}&interval={interval}"
                     logger.info("Navigating to %sm chart...", interval)
                     page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_selector("canvas", timeout=30000)
@@ -145,7 +150,7 @@ class TradingViewFetcher:
 
         # Stitch all frames for archiving/debugging, but return individual frames for AI analysis
         if individual_paths:
-            TradingViewFetcher._stitch_charts(individual_paths, intervals)
+            TradingViewFetcher._stitch_charts(individual_paths, intervals, symbol=symbol)
             return individual_paths
 
         return individual_paths
