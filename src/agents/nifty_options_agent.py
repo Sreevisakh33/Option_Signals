@@ -57,6 +57,83 @@ class NiftyOptionsAgent(BaseAgent):
         """Format the Option Chain into a neat text block for LLM inference."""
         return self.options_calc.process_chain_data(json_data, spot_price)
 
+    def get_oi_momentum(self, live_data: dict, spot_price: float) -> str:
+        """Calculates 15-minute OI momentum by comparing live data with the archived snapshot."""
+        archive_file = ARCHIVE_DIR / "last_chain_snapshot.json"
+        download_file = DOWNLOAD_DIR / "last_chain_snapshot.json"
+        
+        # 1. State Management (Check Archive)
+        if not archive_file.exists():
+            try:
+                with open(download_file, "w") as f:
+                    json.dump(live_data, f, indent=2)
+            except Exception as e:
+                logger.error("Failed to save initial momentum snapshot: %s", e)
+            return "No previous 15-minute data available. First snapshot saved. HOLD until momentum is established."
+        
+        # 2. Calculate the Delta
+        try:
+            with open(archive_file, "r") as f:
+                archived_data = json.load(f)
+                
+            archived_records = archived_data.get("filtered", {}).get("data", [])
+            archived_map = {r.get("strikePrice"): r for r in archived_records if r.get("strikePrice")}
+            
+            live_records = live_data.get("filtered", {}).get("data", [])
+            momentum_strings = []
+            
+            for live_row in live_records:
+                strike = live_row.get("strikePrice")
+                if not strike:
+                    continue
+                    
+                # 3. Filter for Noise: Near ATM (within +/- 500)
+                if abs(strike - spot_price) > 500:
+                    continue
+                    
+                archived_row = archived_map.get(strike)
+                if not archived_row:
+                    continue
+                    
+                live_ce_oi = live_row.get("CE", {}).get("openInterest", 0)
+                live_pe_oi = live_row.get("PE", {}).get("openInterest", 0)
+                
+                archived_ce_oi = archived_row.get("CE", {}).get("openInterest", 0)
+                archived_pe_oi = archived_row.get("PE", {}).get("openInterest", 0)
+                
+                ce_diff = live_ce_oi - archived_ce_oi
+                pe_diff = live_pe_oi - archived_pe_oi
+                
+                # Filter for significance (> 10000)
+                if abs(ce_diff) > 10000 or abs(pe_diff) > 10000:
+                    parts = [f"Strike {strike}:"]
+                    if abs(ce_diff) > 10000:
+                        action = "Short covering" if ce_diff < 0 else "Resistance building"
+                        direction = "decreased" if ce_diff < 0 else "increased"
+                        parts.append(f"Call OI {direction} by {abs(ce_diff)} ({action}).")
+                    
+                    if abs(pe_diff) > 10000:
+                        action = "Long unwinding/Weakness" if pe_diff < 0 else "Support building"
+                        direction = "decreased" if pe_diff < 0 else "increased"
+                        parts.append(f"Put OI {direction} by {abs(pe_diff)} ({action}).")
+                        
+                    # 4. Format for the LLM
+                    momentum_strings.append(" ".join(parts))
+            
+            # 5. Overwrite the Archive (crucial) -> saving to DOWNLOAD_DIR so finally block moves it to archive
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            with open(download_file, "w") as f:
+                json.dump(live_data, f, indent=2)
+                
+            if not momentum_strings:
+                return "15-Minute OI Momentum: No significant OI changes (>10000 contracts) near ATM."
+                
+            return "15-Minute OI Momentum:\n" + "\n".join(momentum_strings)
+            
+        except Exception as e:
+            logger.error("Error calculating OI momentum: %s", e)
+            return "15-Minute OI Momentum: Calculation failed due to data error."
+
     def run_strategy(self, chain_text: str, chart_paths: list[str], prompt_name: str = "system_prompt") -> str:
         """Runs the processed data and images through GPT-4o using a specified prompt."""
         prompt_text = load_prompt(prompt_name)
@@ -123,6 +200,11 @@ class NiftyOptionsAgent(BaseAgent):
 
             # Step 2: Calculate Max Pain, PCR, and Format Data
             chain_text = self.process_data(json_data, spot_price)
+            
+            # Add OI Momentum Component
+            oi_momentum_text = self.get_oi_momentum(json_data, spot_price)
+            chain_text = f"{chain_text}\n\n{oi_momentum_text}"
+            logger.info("OI Momentum evaluated and appended.")
             
             # Step 3: Run Combined Strategy (Efficient Single Call)
             logger.info("Executing master combined strategy query...")
