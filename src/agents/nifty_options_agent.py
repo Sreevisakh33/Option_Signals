@@ -65,10 +65,51 @@ class NiftyOptionsAgent(BaseAgent):
         # 1. State Management (Check Archive)
         if not archive_file.exists():
             try:
+                DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 with open(download_file, "w") as f:
                     json.dump(live_data, f, indent=2)
             except Exception as e:
                 logger.error("Failed to save initial momentum snapshot: %s", e)
+                
+            # Check for Opening Drive (09:15 - 09:20 AM)
+            current_time = datetime.now().time()
+            start_time = datetime.strptime("09:15", "%H:%M").time()
+            end_time = datetime.strptime("09:20", "%H:%M").time()
+            
+            if start_time <= current_time <= end_time:
+                try:
+                    live_records = live_data.get("filtered", {}).get("data", [])
+                    valid_records = [r for r in live_records if "strikePrice" in r]
+                    valid_records.sort(key=lambda x: x["strikePrice"])
+                    
+                    if valid_records:
+                        atm_idx = min(range(len(valid_records)), key=lambda i: abs(valid_records[i]["strikePrice"] - spot_price))
+                        start_idx = max(0, atm_idx - 1)
+                        end_idx = min(len(valid_records), atm_idx + 2)
+                        target_records = valid_records[start_idx:end_idx]
+                        
+                        total_ce_oi = sum(r.get("CE", {}).get("openInterest", 0) for r in target_records)
+                        total_pe_oi = sum(r.get("PE", {}).get("openInterest", 0) for r in target_records)
+                        atm_strike = valid_records[atm_idx]["strikePrice"]
+                        
+                        sentiment = "Balanced / Mixed"
+                        imbalance_type = "balanced"
+                        if total_pe_oi >= 2 * total_ce_oi and total_ce_oi > 0:
+                            sentiment = "Bullish sentiment"
+                            imbalance_type = "massive absolute"
+                        elif total_ce_oi >= 2 * total_pe_oi and total_pe_oi > 0:
+                            sentiment = "Bearish sentiment"
+                            imbalance_type = "massive absolute"
+                            
+                        time_str = current_time.strftime("%I:%M %p").lstrip("0")
+                        
+                        if imbalance_type == "massive absolute":
+                            return f"OPENING DRIVE DETECTED ({time_str}). ATM Strike {atm_strike} shows {imbalance_type} imbalance. Live Put OI: {total_pe_oi} | Live Call OI: {total_ce_oi}. Immediate {sentiment} dominating the open. No previous 15-min data available."
+                        else:
+                            return f"OPENING DRIVE DETECTED ({time_str}). ATM Strike {atm_strike} shows {imbalance_type} open. Live Put OI: {total_pe_oi} | Live Call OI: {total_ce_oi}. {sentiment} at the open. No previous 15-min data available."
+                except Exception as e:
+                    logger.error("Error during Opening Drive calculation: %s", e)
+                    
             return "No previous 15-minute data available. First snapshot saved. HOLD until momentum is established."
         
         # 2. Calculate the Delta
@@ -121,7 +162,7 @@ class NiftyOptionsAgent(BaseAgent):
                     momentum_strings.append(" ".join(parts))
             
             # 5. Overwrite the Archive (crucial) -> saving to DOWNLOAD_DIR so finally block moves it to archive
-            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
             with open(download_file, "w") as f:
                 json.dump(live_data, f, indent=2)
                 
