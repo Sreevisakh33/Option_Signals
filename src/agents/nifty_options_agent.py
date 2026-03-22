@@ -13,6 +13,7 @@ from src.utils.options_calculator import OptionsCalculator
 from src.tools.nse_fetcher import NSEFetcher
 from src.tools.tv_fetcher import TradingViewFetcher
 from src.tools.telegram_notifier import TelegramNotifier
+from src.tools.vix_fetcher import get_india_vix
 from src.utils.logger_config import get_logger
 
 logger = get_logger("NiftyOptionsAgent")
@@ -242,6 +243,11 @@ class NiftyOptionsAgent(BaseAgent):
             # Step 2: Calculate Max Pain, PCR, and Format Data
             chain_text = self.process_data(json_data, spot_price)
             
+            # Add India VIX (Batch 35)
+            vix_value = get_india_vix()
+            logger.info(f"India VIX: {vix_value}")
+            chain_text = f"{chain_text}\n\nINDIA VIX DATA:\n{{\"india_vix\": {vix_value}}}"
+
             # Add OI Momentum Component
             oi_momentum_text = self.get_oi_momentum(json_data, spot_price)
             chain_text = f"{chain_text}\n\n{oi_momentum_text}"
