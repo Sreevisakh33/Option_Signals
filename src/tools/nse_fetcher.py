@@ -70,31 +70,45 @@ class NSEFetcher:
                     if attempt > 1:
                         context.clear_cookies()
 
-                    with page.expect_response(is_full_data, timeout=45000) as response_info:
+                    # Use manual response capturing to avoid Playwright's internal 'expect_response' KeyError
+                    captured_response = []
+                    def on_response(response):
+                        if is_full_data(response):
+                            try:
+                                captured_response.append(response.json())
+                            except:
+                                pass
+                    
+                    page.on("response", on_response)
+                    
+                    try:
                         target_url = f"{NSE_OC_URL}?symbol={symbol.upper()}"
                         logger.info("Navigating to NSE Option Chain: %s", target_url)
-                        # Adding a timestamp-based query param to bypass some caches
                         page.goto(f"{target_url}&refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
                         
-                        # Explicitly select the symbol from the dropdown to ensure the site's internal state updates
+                        # Explicitly select the symbol from the dropdown
                         try:
-                            # Wait for the select element to be available
                             page.wait_for_selector("#equity_optionchain_select", timeout=10000)
-                            # Select the target symbol
                             page.select_option("#equity_optionchain_select", value=symbol.upper())
                             logger.info("Explicitly selected '%s' from NSE dropdown.", symbol.upper())
                         except Exception as sel_err:
                             logger.warning(f"Failed to explicitly select symbol from dropdown: {sel_err}. Relying on URL parameter.")
                         
-                        # Capture the data
-                        response = response_info.value
-                        json_data = response.json()
+                        # Wait for captured response (max 20 seconds loop if goto didn't already trigger)
+                        timeout_limit = time.time() + 20
+                        while not captured_response and time.time() < timeout_limit:
+                            time.sleep(0.5)
+                        
+                        if not captured_response:
+                            logger.warning("No fresh JSON intercepted on attempt %d.", attempt)
+                            continue
+                            
+                        json_data = captured_response[0]
                         
                         # VALIDATE TIMESTAMP
                         ts_str = json_data.get("records", {}).get("timestamp", "")
                         
                         if ts_str:
-                            # Format: "18-Mar-2026 10:20:00"
                             try:
                                 data_date = datetime.strptime(ts_str.split()[0], "%d-%b-%Y").date()
                                 today_date = datetime.now().date()
@@ -103,22 +117,25 @@ class NSEFetcher:
                                     from src.utils.settings import FORCE_FETCH
                                     if FORCE_FETCH:
                                         logger.warning(f"FORCE_FETCH is ENABLED. Proceeding with STALE data: {ts_str}")
-                                        break # Override: Proceed anyway
+                                        break
                                     
-                                    logger.warning(f"Detected STALE data! Data Date: {data_date} | Today: {today_date} (Note: Live market starts at 09:15 AM IST). Refreshing...")
+                                    logger.warning(f"Detected STALE data! Data Date: {data_date} | Today: {today_date}. Refreshing...")
                                     if attempt == max_attempts:
-                                        logger.error("Data is still stale after all retries. Market may not be open yet. Aborting Fetch.")
+                                        logger.error("Data is still stale after all retries.")
                                         return None, None
-                                    continue # Try again
+                                    continue
                                 else:
                                     logger.info(f"Intercepted FRESH NSE API response: {ts_str}")
-                                    break # Success
+                                    break
                             except Exception as parse_err:
                                 logger.error(f"Error parsing NSE timestamp '{ts_str}': {parse_err}")
                         
                         if "records" in json_data and "underlyingValue" in json_data["records"]:
                             spot_price = json_data["records"]["underlyingValue"]
-                            break # Assume success if no timestamp but we have data (fallback)
+                            break
+                    finally:
+                        # Clean up the listener
+                        page.remove_listener("response", on_response)
 
                 except Exception as e:
                     logger.error("Error acquiring NSE Option Chain on attempt %d: %s", attempt, e)
