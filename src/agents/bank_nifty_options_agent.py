@@ -242,6 +242,10 @@ class BankNiftyOptionsAgent(BaseAgent):
             # Step 3: Run Strategy
             raw_response = self.run_strategy(chain_text, chart_paths, prompt_name="system_prompt")
             
+            if raw_response is None:
+                logger.error("Bank Nifty Strategy returned None.")
+                return
+
             # Step 4: Parse & Broadcast
             try:
                 json_str = raw_response.strip()
@@ -321,16 +325,24 @@ class BankNiftyOptionsAgent(BaseAgent):
             logger.error("Error logging Bank Nifty signal: %s", e)
 
     def archive_downloads(self):
-        """Cleans up downloads for Bank Nifty run."""
+        """Moves all files from DOWNLOAD_DIR to ARCHIVE_DIR for Bank Nifty."""
         try:
-            logger.info("Cleaning up Bank Nifty snapshots...")
+            logger.info("Archiving Bank Nifty market snapshots...")
+            
+            # 1. Clear Archive before moving new ones (optional, consistent with NiftyAgent)
+            if ARCHIVE_DIR.exists():
+                shutil.rmtree(ARCHIVE_DIR)
+            ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # 2. Move ALL files from Snapshots to Archive
             if DOWNLOAD_DIR.exists():
                 for item in DOWNLOAD_DIR.iterdir():
-                    if "bank_nifty" in item.name:
-                        # Move to a permanent archive instead of clearing everything if we want to preserve Nifty?
-                        # Actually, nifty_options_agent.py CLEARs the archive. 
-                        # For now, let's just move it to ARCHIVE_DIR.
+                    if item.is_file():
                         shutil.move(str(item), str(ARCHIVE_DIR / item.name))
+                    elif item.is_dir():
+                        shutil.move(str(item), str(ARCHIVE_DIR / item.name))
+            
+            logger.info("Bank Nifty Archive complete. Snapshot folder cleaned.")
         except Exception as e:
             logger.error("Error during Bank Nifty archiving: %s", e)
 
