@@ -2,6 +2,7 @@ import os
 import csv
 import sys
 import time
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -42,85 +43,96 @@ class PaperEvaluator:
         logger.info("FyersModel initialized for evaluation.")
 
     def get_expiry_details(self, date_obj):
-        """Calculates Today, next Thursday (Weekly) and last Thursday (Monthly) for symbols."""
-        # Symbol format for Today (useful if today is expiry)
-        today_year_2digit = str(date_obj.year)[-2:]
-        m_today = date_obj.month
-        today_month_code = str(m_today) if m_today <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m_today)]
-        today_day_str = date_obj.strftime("%d")
+        """Calculates potential weekly symbols (Tue/Mon/Wed) to handle holiday shifts."""
+        def format_expiry(d_obj):
+            y_2d = str(d_obj.year)[-2:]
+            m = d_obj.month
+            m_code = str(m) if m <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m)]
+            day_s = d_obj.strftime("%d")
+            return f"{y_2d}{m_code}{day_s}"
 
-        # Next Tuesday (Nifty 50 moved to Tuesday expiries in 2026)
-        days_ahead = 1 - date_obj.weekday()
-        if days_ahead < 0:
-            days_ahead += 7
-        next_tue = date_obj + timedelta(days=days_ahead)
+        # Current Tuesday candidate
+        days_to_tue = (1 - date_obj.weekday()) % 7
+        next_tue = date_obj + timedelta(days=days_to_tue)
         
-        # Monthly symbol formatting
-        month_year_2digit = str(next_tue.year)[-2:]
+        # Holiday shifts: checks Tue, Mon, Wed
+        # We also keep 'today' as a top candidate
+        y_2d_today = str(date_obj.year)[-2:]
+        m_today = date_obj.month
+        m_code_today = str(m_today) if m_today <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m_today)]
+        day_s_today = date_obj.strftime("%d")
+        
         month_name = next_tue.strftime("%b").upper()
         
-        # Weekly month code (1-9, O, N, D)
-        m = next_tue.month
-        month_code = str(m) if m <= 9 else {"10": "O", "11": "N", "12": "D"}[str(m)]
-        day_str = next_tue.strftime("%d")
-        
         return {
-            "today": f"{today_year_2digit}{today_month_code}{today_day_str}",
-            "weekly": f"{month_year_2digit}{month_code}{day_str}",
-            "monthly": f"{month_year_2digit}{month_name}"
+            "today": f"{y_2d_today}{m_code_today}{day_s_today}",
+            "tue": format_expiry(next_tue),
+            "mon": format_expiry(next_tue - timedelta(days=1)),
+            "wed": format_expiry(next_tue + timedelta(days=1)),
+            "monthly": f"{str(next_tue.year)[-2:]}{month_name}"
         }
 
     def format_fyers_symbol(self, instrument_str: str, trade_date: datetime) -> str:
         """
-        Converts 'NIFTY 23150 CE' to Fyers format.
-        Logic: Try Weekly first, fall back to Monthly if requested or if weekly fails.
+        Converts 'NIFTY 23150 CE' or 'BANKNIFTY 53000 PE' to Fyers format.
         """
         parts = instrument_str.split()
-        if len(parts) != 3 or parts[0] != "NIFTY":
+        if len(parts) < 2:
             return ""
             
-        strike = parts[1]
-        opt_type = parts[2]
+        symbol = parts[0]
+        if symbol not in ["NIFTY", "BANKNIFTY"]:
+            return ""
+            
+        # Extract strike/type from either 3-part or 2-part instrument names
+        if len(parts) == 3:
+            strike = parts[1]
+            opt_type = parts[2]
+        else:
+            combined = parts[1]
+            match = re.search(r"(\d{5})(CE|PE)$", combined)
+            if match:
+                strike = match.group(1)
+                opt_type = match.group(2)
+            else:
+                return ""
         
         expiry = self.get_expiry_details(trade_date)
-        
-        # Defaulting to Weekly format as it is most common for these signals
-        fyers_symbol = f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}"
-        return fyers_symbol
+        return f"NSE:{symbol}{expiry['tue']}{strike}{opt_type}"
 
     def fetch_historical_data(self, fyers_symbol: str, start_time: datetime):
-        """Fetches 5-minute historical data from signal time to EOD."""
+        """Fetches historical data from signal time to EOD, with resolution fallback."""
         if not self.fyers:
             return []
 
-        # Fyers requires epoch timestamp or YYYY-MM-DD format based on range_from/to
         range_from = start_time.strftime("%Y-%m-%d")
         range_to = datetime.now().strftime("%Y-%m-%d")
         
-        data = {
-            "symbol": fyers_symbol,
-            "resolution": "5",
-            "date_format": "1",
-            "range_from": range_from,
-            "range_to": range_to,
-            "cont_flag": "1"
-        }
-
-        try:
-            response = self.fyers.history(data=data)
-            if response.get("s") == "ok":
-                candles = response.get("candles", [])
-                # Filter candles starting from the BEGINNING of the 5m candle where signal occurred
-                # Subtracting 300 seconds to ensure we capture the full 5m block containing start_time
-                start_epoch = int(start_time.timestamp()) - 300
-                valid_candles = [c for c in candles if c[0] >= start_epoch]
-                return valid_candles
-            else:
-                logger.warning(f"Failed to fetch data for {fyers_symbol}: {response}")
-                return []
-        except Exception as e:
-            logger.error(f"Error fetching history for {fyers_symbol}: {e}")
-            return []
+        for res in ["1", "5"]:
+            data = {
+                "symbol": fyers_symbol,
+                "resolution": res,
+                "date_format": "1",
+                "range_from": range_from,
+                "range_to": range_to,
+                "cont_flag": "1"
+            }
+            try:
+                response = self.fyers.history(data=data)
+                if response and response.get("s") == "ok":
+                    candles = response.get("candles", [])
+                    if candles:
+                        # Precision filtering: only candles AFTER start_time
+                        start_epoch = int(start_time.timestamp())
+                        # If resolution is 5m, include the candle containing the signal
+                        if res == "5":
+                            start_epoch -= 300
+                            logger.info(f"Using 5m fallback for {fyers_symbol}")
+                        
+                        return [c for c in candles if c[0] >= start_epoch]
+            except Exception as e:
+                logger.error(f"Error fetching {fyers_symbol} at res {res}: {e}")
+        return []
 
     def evaluate_trade(self, row, valid_candles):
         """
@@ -205,11 +217,12 @@ class PaperEvaluator:
                     if row["Status"] in ["PENDING", "ACTIVE", "ERROR"]:
                         expiry = self.get_expiry_details(trade_time)
                         
-                        try:
                             # Handling both formats:
                             # New: NIFTY 24MAR23900CE (2 parts)
                             # Old: NIFTY 23900 CE (3 parts)
+                            # NEW Bank Nifty: BANKNIFTY 20MAR53000CE (2 parts)
                             parts = row["Instrument"].split()
+                            symbol_prefix = parts[0]
                             if len(parts) == 3:
                                 strike = parts[1]
                                 opt_type = parts[2]
@@ -229,71 +242,57 @@ class PaperEvaluator:
                             continue
 
                         symbols_to_try = [
-                            f"NSE:NIFTY{expiry['today']}{strike}{opt_type}",
-                            f"NSE:NIFTY{expiry['weekly']}{strike}{opt_type}",
-                            f"NSE:NIFTY{expiry['monthly']}{strike}{opt_type}"
+                            f"NSE:{symbol_prefix}{expiry['today']}{strike}{opt_type}",
+                            f"NSE:{symbol_prefix}{expiry['tue']}{strike}{opt_type}",
+                            f"NSE:{symbol_prefix}{expiry['mon']}{strike}{opt_type}",
+                            f"NSE:{symbol_prefix}{expiry['wed']}{strike}{opt_type}",
+                            f"NSE:{symbol_prefix}{expiry['monthly']}{strike}{opt_type}"
                         ]
+                        # De-duplicate while keeping search order (Weekly -> Monthly)
+                        symbols_to_try = list(dict.fromkeys(symbols_to_try))
                         
                         symbol_hit = ""
-                        data_fetch_error = False
-                        candles = []
+                        final_candles = []
                         
                         for sym in symbols_to_try:
-                            time.sleep(0.5) # Avoid Fyers rate limit
+                            time.sleep(0.5) # Protect Fyers Rate Limit
                             logger.info(f"Trying symbol: {sym}")
-                            data = {
-                                "symbol": sym,
-                                "resolution": "1",
-                                "date_format": "1",
-                                "range_from": trade_time.strftime("%Y-%m-%d"),
-                                "range_to": datetime.now().strftime("%Y-%m-%d"),
-                                "cont_flag": "1"
-                            }
-                            try:
-                                response = self.fyers.history(data=data)
-                                if response.get("s") == "ok":
-                                    all_candles = response.get("candles", [])
-                                    # Start evaluation strictly 1 minute AFTER signal to ensure logical Exit_Time
-                                    start_epoch = int(trade_time.timestamp()) + 60
-                                    candles = [c for c in all_candles if c[0] >= start_epoch]
-                                    
-                                    # --- ENTRY MATCH GUARD ---
-                                    if candles:
-                                        first_candle_open = candles[0][1] # Open of first valid candle
-                                        try:
-                                            row_entry = float(row["Entry_Price"])
-                                        except:
-                                            row_entry = 0
-                                        
-                                        if row_entry > 0:
-                                            diff = abs(first_candle_open - row_entry) / row_entry
-                                            if diff > 0.15: # 15% tolerance
-                                                logger.warning(f"Price mismatch for {sym}: CSV={row_entry}, Market={first_candle_open} ({diff:.1%}). Skipping symbol.")
-                                                candles = []
-                                                continue
-                                    # --------------------------
-
-                                    if candles:
-                                        symbol_hit = sym
-                                        break
-                                elif response.get("code") in [-300, -16]:
+                            candles = self.fetch_historical_data(sym, trade_time)
+                            
+                            if candles:
+                                # Start evaluation with a 60s offset to ensure logical Exit_Times
+                                start_epoch = int(trade_time.timestamp()) + 60
+                                filtered_candles = [c for c in candles if c[0] >= start_epoch]
+                                
+                                if not filtered_candles:
                                     continue
-                                else:
-                                    logger.warning(f"API Error for {sym}: {response.get('message')}")
-                                    data_fetch_error = True
-                                    break
-                            except Exception as e:
-                                logger.error(f"Exc fetching {sym}: {e}")
-                                data_fetch_error = True
+
+                                # --- ENTRY MATCH GUARD ---
+                                # Check if Market Open is within 15% of recorded Signal Entry
+                                market_open = filtered_candles[0][1]
+                                try:
+                                    entry_price = float(row["Entry_Price"])
+                                except:
+                                    entry_price = 0
+                                    
+                                if entry_price > 0:
+                                    diff = abs(market_open - entry_price) / entry_price
+                                    if diff > 0.15:
+                                        logger.warning(f"Price mismatch for {sym}: CSV={entry_price}, Market={market_open} ({diff:.1%}). Skipping.")
+                                        continue
+                                
+                                # Found valid symbol and price match!
+                                symbol_hit = sym
+                                final_candles = filtered_candles
                                 break
                         
-                        if candles:
+                        if final_candles:
                             logger.info(f"Data found for {symbol_hit}. Evaluating...")
-                            new_status, exit_time = self.evaluate_trade(row, candles)
+                            new_status, exit_time = self.evaluate_trade(row, final_candles)
                             row["Status"] = new_status
                             row["Exit_Time"] = exit_time
                             
-                            # Update Result
+                            # Increment stats
                             if new_status == "HIT_TARGET":
                                 row["Result"] = "PROFIT"
                                 stats["HIT_TARGET"] += 1
@@ -311,12 +310,10 @@ class PaperEvaluator:
                                 stats["NO_SIGNAL"] += 1
                             
                             logger.info(f"Result for {symbol_hit}: {new_status} at {exit_time or 'N/A'}")
-                        elif data_fetch_error:
-                            row["Status"] = "ERROR"
-                            row["Result"] = "API_ERROR"
-                            stats["ERROR"] += 1
                         else:
-                            logger.warning(f"No data found for symbols {symbols_to_try}")
+                            # If all attempts failed, mark as SYNC_MISMATCH or NO_DATA
+                            row["Status"] = "NO_DATA"
+                            logger.warning(f"No valid data/symbol match found for {row['Instrument']} at {row['Timestamp']}")
                     
                     results_to_save.append(row)
                     
