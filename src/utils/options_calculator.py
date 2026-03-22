@@ -12,6 +12,8 @@ class OptionsCalculator:
         if df.empty or "Strike Price" not in df.columns:
             return 0.0
         
+        min_loss = float("inf")
+        max_pain = None
         for expected_expiry in df["Strike Price"].unique():
             ce_loss = ((expected_expiry - df["Strike Price"]).clip(lower=0) * df["CE_OI"]).sum()
             pe_loss = ((df["Strike Price"] - expected_expiry).clip(lower=0) * df["PE_OI"]).sum()

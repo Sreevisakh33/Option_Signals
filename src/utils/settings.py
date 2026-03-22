@@ -29,8 +29,8 @@ TV_USERNAME = os.getenv("TV_USERNAME", "")
 TV_PASSWORD = os.getenv("TV_PASSWORD", "")
 
 # TradingView chart layout IDs
-NIFTY_CHART_ID = os.getenv("NIFTY_CHART_ID", "Nchart")
-BANKNIFTY_CHART_ID = os.getenv("BANKNIFTY_CHART_ID", "BNChart")
+NIFTY_CHART_ID = os.getenv("NIFTY_CHART_ID", "RexSiIGM") # Default back to successful shared ID
+BANKNIFTY_CHART_ID = os.getenv("BANKNIFTY_CHART_ID", "RexSiIGM")
 
 # Base URL for any chart - identifiers will be injected at runtime
 TRADINGVIEW_CHART_BASE_URL = "https://in.tradingview.com/chart"

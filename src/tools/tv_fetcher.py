@@ -113,7 +113,7 @@ class TradingViewFetcher:
                     # Select Layout ID and Symbol based on target index
                     if "BANK" in symbol.upper():
                          chart_id = BANKNIFTY_CHART_ID
-                         tv_symbol = "NSE%3ABANKNIFTY1%21"
+                         tv_symbol = "NSE%3ABANKNIFTY"
                     else:
                          chart_id = NIFTY_CHART_ID
                          tv_symbol = "NSE%3ANIFTY1%21"
