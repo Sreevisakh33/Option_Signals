@@ -71,6 +71,16 @@ class NSEFetcher:
                         # Adding a timestamp-based query param to bypass some caches
                         page.goto(f"{target_url}&refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
                         
+                        # Explicitly select the symbol from the dropdown to ensure the site's internal state updates
+                        try:
+                            # Wait for the select element to be available
+                            page.wait_for_selector("#equity_optionchain_select", timeout=10000)
+                            # Select the target symbol
+                            page.select_option("#equity_optionchain_select", value=symbol.upper())
+                            logger.info("Explicitly selected '%s' from NSE dropdown.", symbol.upper())
+                        except Exception as sel_err:
+                            logger.warning(f"Failed to explicitly select symbol from dropdown: {sel_err}. Relying on URL parameter.")
+                        
                         # Capture the data
                         response = response_info.value
                         json_data = response.json()
