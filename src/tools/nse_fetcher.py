@@ -128,6 +128,8 @@ class NSEFetcher:
             if json_data and "records" in json_data and "underlyingValue" in json_data["records"]:
                 spot_price = json_data["records"]["underlyingValue"]
 
+            # Small sleep to disarm any race conditions in Playwright listeners before closing
+            time.sleep(1)
             page.close()
             browser.close()
 
