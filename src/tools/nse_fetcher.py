@@ -84,7 +84,15 @@ class NSEFetcher:
                                 today_date = datetime.now().date()
                                 
                                 if data_date < today_date:
-                                    logger.warning(f"Detected STALE data! Data Date: {data_date} | Today: {today_date}. Refreshing...")
+                                    from src.utils.settings import FORCE_FETCH
+                                    if FORCE_FETCH:
+                                        logger.warning(f"FORCE_FETCH is ENABLED. Proceeding with STALE data: {ts_str}")
+                                        break # Override: Proceed anyway
+                                    
+                                    logger.warning(f"Detected STALE data! Data Date: {data_date} | Today: {today_date} (Note: Live market starts at 09:15 AM IST). Refreshing...")
+                                    if attempt == max_attempts:
+                                        logger.error("Data is still stale after all retries. Market may not be open yet. Aborting Fetch.")
+                                        return None, None
                                     continue # Try again
                                 else:
                                     logger.info(f"Intercepted FRESH NSE API response: {ts_str}")

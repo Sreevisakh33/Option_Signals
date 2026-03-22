@@ -38,6 +38,7 @@ TRADINGVIEW_CHART_URL = os.getenv(
 TRADINGVIEW_CHART_BASE_URL = TRADINGVIEW_CHART_URL
 
 NSE_OC_URL = "https://www.nseindia.com/option-chain"
+FORCE_FETCH = os.getenv("FORCE_FETCH", "false").lower() == "true"
 
 def load_prompt(prompt_name: str = "system_prompt") -> str:
     """Loads a prompt from the config/prompts.yaml file."""
