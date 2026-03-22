@@ -39,7 +39,7 @@ class NiftyOptionsAgent(BaseAgent):
         """Fetch the JSON Option Chain and the TradingView Images in parallel."""
         logger.info("Starting parallel data acquisition...")
         with ThreadPoolExecutor(max_workers=2) as executor:
-            tv_future = executor.submit(TradingViewFetcher.capture_charts, intervals=[3, 5, 15])
+            tv_future = executor.submit(TradingViewFetcher.capture_charts, intervals=[3, 5, 15], symbol="NIFTY", prefix="N_")
             nse_future = executor.submit(NSEFetcher.fetch_json)
             
             chart_paths = tv_future.result()

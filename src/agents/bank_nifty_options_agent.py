@@ -41,10 +41,15 @@ class BankNiftyOptionsAgent(BaseAgent):
         logger.info("Starting parallel Bank Nifty data acquisition...")
         with ThreadPoolExecutor(max_workers=2) as executor:
             # Bank Nifty uses 5m and 15m only
-            tv_future = executor.submit(TradingViewFetcher.capture_charts, intervals=[5, 15], symbol="BANKNIFTY")
+            # 2. Capture TradingView Charts (5m, 15m)
+            try:
+                tv_future = executor.submit(TradingViewFetcher.capture_charts, intervals=[5, 15], symbol="BANKNIFTY", prefix="BN_")
+            except Exception as e:
+                logger.error(f"Error submitting TradingViewFetcher task: {e}")
+                tv_future = None # Ensure tv_future is defined even if submission fails
             nse_future = executor.submit(NSEFetcher.fetch_json, symbol="BANKNIFTY")
             
-            chart_paths = tv_future.result()
+            chart_paths = tv_future.result() if tv_future else []
             json_data, spot_price = nse_future.result()
             
         if json_data:

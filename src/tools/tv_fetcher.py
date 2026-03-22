@@ -9,7 +9,6 @@ from src.utils.logger_config import get_logger
 logger = get_logger("TradingViewFetcher")
 
 INTERVALS = [3, 5, 15]
-COMBINED_CHART_PATH = str(DOWNLOAD_DIR / "chart_multipane.png")
 STORAGE_STATE_PATH = str(BASE_DIR / ".tv_storage_state.json")
 
 
@@ -32,7 +31,7 @@ class TradingViewFetcher:
             return False
 
     @staticmethod
-    def _stitch_charts(chart_paths: list[str], intervals: list[int], symbol: str = "NIFTY") -> str:
+    def _stitch_charts(chart_paths: list[str], intervals: list[int], symbol: str = "NIFTY", prefix: str = "") -> str:
         """Stitch individual chart images side-by-side with timeframe labels."""
         images = [Image.open(p) for p in chart_paths]
         label_h = 40
@@ -54,12 +53,13 @@ class TradingViewFetcher:
             combined.paste(img, (x, label_h))
             x += img.width
 
-        combined.save(COMBINED_CHART_PATH)
-        logger.info("Multi-pane chart saved → %s (%sx%spx)", COMBINED_CHART_PATH, combined.width, combined.height)
-        return COMBINED_CHART_PATH
+        combined_path = str(DOWNLOAD_DIR / f"{prefix}chart_multipane.png")
+        combined.save(combined_path)
+        logger.info("Multi-pane chart saved → %s (%sx%spx)", combined_path, combined.width, combined.height)
+        return combined_path
 
     @staticmethod
-    def capture_charts(intervals: list[int] = INTERVALS, symbol: str = "NIFTY") -> list[str]:
+    def capture_charts(intervals: list[int] = INTERVALS, symbol: str = "NIFTY", prefix: str = "") -> list[str]:
         """
         Log in to TradingView, capture each timeframe in fullscreen mode
         (Shift+F hides sidebars), stitch all panes into one combined image,
@@ -149,7 +149,7 @@ class TradingViewFetcher:
                     page.keyboard.press("Shift+F")
                     time.sleep(1.5)
 
-                    out_path = DOWNLOAD_DIR / f"chart_{interval}m.png"
+                    out_path = DOWNLOAD_DIR / f"{prefix}chart_{interval}m.png"
                     out = str(out_path)
                     page.screenshot(path=out, full_page=False)
                     logger.info("Saved: %s", out)
@@ -166,7 +166,7 @@ class TradingViewFetcher:
 
         # Stitch all frames for archiving/debugging, but return individual frames for AI analysis
         if individual_paths:
-            TradingViewFetcher._stitch_charts(individual_paths, intervals, symbol=symbol)
+            TradingViewFetcher._stitch_charts(individual_paths, intervals, symbol=symbol, prefix=prefix)
             return individual_paths
 
         return individual_paths
