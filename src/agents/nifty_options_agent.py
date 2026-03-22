@@ -363,25 +363,33 @@ class NiftyOptionsAgent(BaseAgent):
 
     def archive_downloads(self):
         """
-        Moves all files from DOWNLOAD_DIR to ARCHIVE_DIR.
-        Clears ARCHIVE_DIR first so it only has one 'copy' of the latest run.
+        Symbol-specific archiving for Nifty.
+        Only moves/deletes Nifty-labeled files to prevent wiping Bank Nifty data.
         """
         try:
-            logger.info("Archiving market snapshots and cleaning up...")
+            logger.info("Archiving Nifty market snapshots...")
             
-            # 1. Clear Archive
+            # 1. Identify Nifty specific files
+            # Nifty prefixes: N_, nse_option_chain, last_chain_snapshot
+            nifty_patterns = ["N_", "nse_option_chain.json", "last_chain_snapshot.json"]
+            
+            # 2. Selective cleanup of ARCHIVE_DIR (only Nifty files)
             if ARCHIVE_DIR.exists():
-                shutil.rmtree(ARCHIVE_DIR)
-            ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+                for item in ARCHIVE_DIR.iterdir():
+                    if any(p in item.name for p in nifty_patterns):
+                        if item.is_file():
+                            item.unlink()
+                        elif item.is_dir():
+                            shutil.rmtree(item)
+            else:
+                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
             
-            # 2. Move files from Snapshots to Archive
+            # 3. Selective move from DOWNLOAD_DIR to ARCHIVE_DIR
             if DOWNLOAD_DIR.exists():
                 for item in DOWNLOAD_DIR.iterdir():
-                    if item.is_file():
-                        shutil.move(str(item), str(ARCHIVE_DIR / item.name))
-                    elif item.is_dir():
+                    if any(p in item.name for p in nifty_patterns):
                         shutil.move(str(item), str(ARCHIVE_DIR / item.name))
             
-            logger.info("Archive complete. Snapshot folder is now empty.")
+            logger.info("Nifty Archiving complete.")
         except Exception as e:
-            logger.error("Error during archiving: %s", e)
+            logger.error("Error during Nifty archiving: %s", e)

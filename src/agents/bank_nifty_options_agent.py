@@ -325,24 +325,35 @@ class BankNiftyOptionsAgent(BaseAgent):
             logger.error("Error logging Bank Nifty signal: %s", e)
 
     def archive_downloads(self):
-        """Moves all files from DOWNLOAD_DIR to ARCHIVE_DIR for Bank Nifty."""
+        """
+        Symbol-specific archiving for Bank Nifty.
+        Only moves/deletes Bank Nifty labeled files (BN_ prefix).
+        """
         try:
             logger.info("Archiving Bank Nifty market snapshots...")
             
-            # 1. Clear Archive before moving new ones (optional, consistent with NiftyAgent)
-            if ARCHIVE_DIR.exists():
-                shutil.rmtree(ARCHIVE_DIR)
-            ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+            # 1. Identify Bank Nifty specific files
+            # Bank Nifty patterns: BN_ (charts), bank_nifty_ (json chains)
+            bn_patterns = ["BN_", "bank_nifty_"]
             
-            # 2. Move ALL files from Snapshots to Archive
+            # 2. Selective cleanup of ARCHIVE_DIR (only BN files)
+            if ARCHIVE_DIR.exists():
+                for item in ARCHIVE_DIR.iterdir():
+                    if any(p in item.name for p in bn_patterns):
+                        if item.is_file():
+                            item.unlink()
+                        elif item.is_dir():
+                            shutil.rmtree(item)
+            else:
+                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # 3. Selective move from DOWNLOAD_DIR to ARCHIVE_DIR
             if DOWNLOAD_DIR.exists():
                 for item in DOWNLOAD_DIR.iterdir():
-                    if item.is_file():
-                        shutil.move(str(item), str(ARCHIVE_DIR / item.name))
-                    elif item.is_dir():
+                    if any(p in item.name for p in bn_patterns):
                         shutil.move(str(item), str(ARCHIVE_DIR / item.name))
             
-            logger.info("Bank Nifty Archive complete. Snapshot folder cleaned.")
+            logger.info("Bank Nifty Archiving complete.")
         except Exception as e:
             logger.error("Error during Bank Nifty archiving: %s", e)
 
