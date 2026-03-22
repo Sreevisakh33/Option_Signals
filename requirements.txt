@@ -6,3 +6,5 @@ openai
 urllib3<2
 python-dotenv
 pyyaml
+yfinance
+fyers-apiv3
