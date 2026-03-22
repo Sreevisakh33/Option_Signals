@@ -259,28 +259,52 @@ class NiftyOptionsAgent(BaseAgent):
             chain_text = f"{chain_text}\n\n{oi_momentum_text}"
             logger.info("OI Momentum evaluated and appended.")
             
-            # Step 3: Run Combined Strategy (Efficient Single Call)
-            logger.info("Executing master combined strategy query...")
-            combined_response = self.run_strategy(chain_text, chart_paths, prompt_name="master_combined_prompt")
+            # Step 3: Run Strategy (Single JSON Call)
+            logger.info("Executing system strategy query (JSON Mode)...")
+            raw_response = self.run_strategy(chain_text, chart_paths, prompt_name="system_prompt")
             
-            # Step 4: Split & Broadcast
-            # The AI returns up to 3 blocks separated by ---MSG---
-            blocks = combined_response.split("---MSG---")
-            
-            personas = ["Breakout Analyst", "Scalping Specialist", "Options Strategist"]
-            
-            for i, block in enumerate(blocks):
-                cleaned_block = block.strip()
-                if not cleaned_block:
-                    continue
+            # Step 4: Parse JSON & Broadcast
+            # The AI returns a JSON object as per system_prompt
+            try:
+                # Cleaner JSON extraction in case of markdown blocks
+                json_str = raw_response.strip()
+                if "```json" in json_str:
+                    json_str = json_str.split("```json")[-1].split("```")[0].strip()
+                elif "```" in json_str:
+                    json_str = json_str.split("```")[1].strip()
                 
-                # Log for paper trading evaluator
-                if i < len(personas):
+                signal_data = json.loads(json_str)
+                decision = signal_data.get("decision", "HOLD").upper()
+                
+                if decision in ["BUY_CALL", "BUY_PUT"]:
+                    # Log for paper trading evaluator
                     nearest_expiry = json_data.get("records", {}).get("expiryDates", [""])[0]
-                    self.parse_and_log_signal(cleaned_block, personas[i], nearest_expiry)
-                
-                # Broadcast message
-                TelegramNotifier.send_alert(cleaned_block)
+                    self.log_json_signal(signal_data, nearest_expiry)
+                    
+                    # Format Telegram Message
+                    emoji = "🚀" if decision == "BUY_CALL" else "🔻"
+                    trade_type = "CALL" if decision == "BUY_CALL" else "PUT"
+                    msg = (
+                        f"{emoji} *SYSTEM SIGNAL: BUY {trade_type}*\n\n"
+                        f"🎯 *Strike:* {signal_data.get('strike')}\n"
+                        f"💰 *Entry:* {signal_data.get('entry_price')}\n"
+                        f"🛑 *SL:* {signal_data.get('stop_loss')}\n"
+                        f"🏁 *Target:* {signal_data.get('target')}\n"
+                        f"🔥 *Confidence:* {signal_data.get('confidence_score')}%\n\n"
+                        f"📝 *Reasoning:* {signal_data.get('reasoning')}"
+                    )
+                    TelegramNotifier.send_alert(msg)
+                else:
+                    logger.info("Decision: HOLD. Reasoning: %s", signal_data.get("reasoning", "No trade setup detected."))
+                    # Optionally send a 'HOLD' notification if confidence is low but relevant
+                    if signal_data.get("confidence_score", 0) > 30:
+                         TelegramNotifier.send_alert(f"⚖️ *SYSTEM STATUS: HOLD*\n\nReasoning: {signal_data.get('reasoning')}")
+
+            except json.JSONDecodeError as je:
+                logger.error("Failed to parse AI JSON response: %s", raw_response)
+                TelegramNotifier.send_alert(f"⚠️ *ERROR:* AI returned malformed JSON.\n\nRaw: {raw_response[:200]}...")
+            except Exception as e:
+                logger.error("Error processing AI response: %s", e)
             
             logger.info("--- Nifty Options Agent Completed ---")
             
@@ -289,56 +313,53 @@ class NiftyOptionsAgent(BaseAgent):
         finally:
             self.archive_downloads()
 
-    def parse_and_log_signal(self, block_text: str, persona: str, nearest_expiry: str = ""):
-        """Parses the text block to extract trade details and logs to CSV."""
-        if "NO TRADE ZONE" in block_text.upper():
-            return
-            
+    def log_json_signal(self, signal_data: dict, nearest_expiry: str = ""):
+        """Logs the structured JSON signal to paper_trades.csv."""
         try:
-            # Extract instrument: look for 5 digits followed by CE/PE
-            instrument_match = re.search(r"Buy Entry:\s*(\d{5}\s*(?:CE|PE))", block_text, re.IGNORECASE)
-            # Extract price levels
-            entry_match = re.search(r"Buy Entry:.*?(?:above|near)\s*([\d\.]+)", block_text, re.IGNORECASE)
-            target_match = re.search(r"Target/Sell:\s*([\d\.]+)", block_text, re.IGNORECASE)
-            sl_match = re.search(r"Stop-Loss:\s*([\d\.]+)", block_text, re.IGNORECASE)
+            decision = signal_data.get("decision", "").upper()
+            strike = signal_data.get("strike")
+            option_type = "CE" if decision == "BUY_CALL" else "PE"
             
-            if instrument_match and entry_match and target_match and sl_match:
-                raw_instrument = instrument_match.group(1).strip().upper().replace(" ", "")
-                
-                # Format expiry: 24-Mar-2026 -> 24MAR
-                expiry_prefix = ""
-                if nearest_expiry:
-                    try:
-                        expiry_dt = datetime.strptime(nearest_expiry, "%d-%b-%Y")
-                        expiry_prefix = expiry_dt.strftime("%d%b").upper()
-                    except:
-                        expiry_prefix = nearest_expiry.split("-")[0] + nearest_expiry.split("-")[1].upper() if "-" in nearest_expiry else ""
+            if not strike:
+                return
 
-                instrument = f"NIFTY {expiry_prefix}{raw_instrument}"
-                entry_price = float(entry_match.group(1))
-                target_price = float(target_match.group(1))
-                sl_price = float(sl_match.group(1))
+            # Format expiry: 24-Mar-2026 -> 24MAR
+            expiry_prefix = ""
+            if nearest_expiry:
+                try:
+                    expiry_dt = datetime.strptime(nearest_expiry, "%d-%b-%Y")
+                    expiry_prefix = expiry_dt.strftime("%d%b").upper()
+                except:
+                    expiry_prefix = nearest_expiry.split("-")[0] + nearest_expiry.split("-")[1].upper() if "-" in nearest_expiry else ""
+
+            instrument = f"NIFTY {expiry_prefix}{strike}{option_type}"
+            entry_price = float(signal_data.get("entry_price", 0))
+            target_price = float(signal_data.get("target", 0))
+            sl_price = float(signal_data.get("stop_loss", 0))
+            
+            # Append to CSV
+            log_dir = BASE_DIR / "logs"
+            log_dir.mkdir(exist_ok=True)
+            csv_path = log_dir / "paper_trades.csv"
+            
+            file_exists = csv_path.exists()
+            with open(csv_path, "a", newline="") as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(["Timestamp", "Persona", "Instrument", "Entry_Price", "Target", "Stop_Loss", "Status"])
                 
-                # Append to CSV
-                log_dir = BASE_DIR / "logs"
-                log_dir.mkdir(exist_ok=True)
-                csv_path = log_dir / "paper_trades.csv"
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Using 'System AI' as the persona for Batch 39
+                writer.writerow([timestamp, "System AI", instrument, entry_price, target_price, sl_price, "PENDING"])
                 
-                file_exists = csv_path.exists()
-                with open(csv_path, "a", newline="") as f:
-                    writer = csv.writer(f)
-                    if not file_exists:
-                        writer.writerow(["Timestamp", "Persona", "Instrument", "Entry_Price", "Target", "Stop_Loss", "Status"])
-                    
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    writer.writerow([timestamp, persona, instrument, entry_price, target_price, sl_price, "PENDING"])
-                    
-                logger.info("Logged PENDING paper trade: [%s] %s | Entry: %s | Tgt: %s | SL: %s", 
-                            persona, instrument, entry_price, target_price, sl_price)
-            else:
-                logger.debug("Could not parse all required fields for paper trade logging in block: %s...", block_text[:50])
+            logger.info("Logged PENDING paper trade: [System AI] %s | Entry: %s | Tgt: %s | SL: %s", 
+                        instrument, entry_price, target_price, sl_price)
         except Exception as e:
-            logger.error("Error parsing signal for paper trading: %s", e)
+            logger.error("Error logging JSON signal for paper trading: %s", e)
+
+    def parse_and_log_signal(self, block_text: str, persona: str, nearest_expiry: str = ""):
+        """Deprecated: Replaced by log_json_signal. Kept for backward compatibility during transition."""
+        pass
 
     def archive_downloads(self):
         """
