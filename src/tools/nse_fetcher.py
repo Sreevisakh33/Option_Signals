@@ -56,7 +56,12 @@ class NSEFetcher:
                         if "api/option-chain" in response.url and symbol.upper() in response.url and response.status == 200:
                             try:
                                 data = response.json()
-                                return "records" in data and "data" in data["records"]
+                                # Ensure we have records and actual option chain data rows
+                                has_records = "records" in data and "data" in data["records"]
+                                if has_records:
+                                    # Ensure the data list isn't empty (common at night/maintenance)
+                                    return len(data["records"]["data"]) > 0
+                                return False
                             except:
                                 return False
                         return False

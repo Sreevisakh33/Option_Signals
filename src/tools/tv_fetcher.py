@@ -119,9 +119,20 @@ class TradingViewFetcher:
                          tv_symbol = "NSE%3ANIFTY1%21"
                     
                     url = f"{TRADINGVIEW_CHART_BASE_URL}/{chart_id}/?symbol={tv_symbol}&interval={interval}"
-                    logger.info("Navigating to %s %sm chart (Layout: %s)...", symbol.upper(), interval, chart_id)
-                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                    page.wait_for_selector("canvas", timeout=30000)
+                    logger.info("Navigating to %s %sm chart (Layout: %s) -> URL: %s", symbol.upper(), interval, chart_id, url)
+                    page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                    
+                    try:
+                        # Wait longer for canvas as some complex layouts with indicators can be slow
+                        page.wait_for_selector("canvas", timeout=60000)
+                    except Exception as timeout_err:
+                        logger.error(f"Timeout waiting for canvas on {symbol} {interval}m: {timeout_err}")
+                        # Take a diagnostic screenshot to see what's happening
+                        diag_path = DOWNLOAD_DIR / f"error_{symbol}_{interval}m.png"
+                        page.screenshot(path=str(diag_path))
+                        logger.info("Saved diagnostic error screenshot: %s", diag_path)
+                        continue
+                        
                     time.sleep(5)   # Allow CPR/EMA/Volume indicators to fully render
 
                     # Dismiss popups

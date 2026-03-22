@@ -9,8 +9,9 @@ class OptionsCalculator:
 
     def calculate_max_pain(self, df: pd.DataFrame) -> float:
         """Calculates Option Max Pain based on the standard Open Interest loss formula."""
-        min_loss = float("inf")
-        max_pain = None
+        if df.empty or "Strike Price" not in df.columns:
+            return 0.0
+        
         for expected_expiry in df["Strike Price"].unique():
             ce_loss = ((expected_expiry - df["Strike Price"]).clip(lower=0) * df["CE_OI"]).sum()
             pe_loss = ((df["Strike Price"] - expected_expiry).clip(lower=0) * df["PE_OI"]).sum()
@@ -25,10 +26,10 @@ class OptionsCalculator:
         Parses the JSON Option Chain to identify current Spot Price, locate ATM strike, 
         filter to ATM +/- 10 strikes, and format text strings.
         """
-        if not json_data or "filtered" not in json_data or "data" not in json_data["filtered"]:
-            raise ValueError("Invalid JSON data provided.")
+        records = json_data.get("filtered", {}).get("data", [])
+        if not records:
+            raise ValueError("Option chain data (records) is empty or missing.")
             
-        records = json_data["filtered"]["data"]
         timestamp = json_data.get("records", {}).get("timestamp", "Unknown")
         self.logger.info("Processing NSE data with timestamp: %s", timestamp)
         
