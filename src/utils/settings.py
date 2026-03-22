@@ -28,14 +28,15 @@ OPENAI_API_KEY     = os.getenv("OPENAI_API_KEY")
 TV_USERNAME = os.getenv("TV_USERNAME", "")
 TV_PASSWORD = os.getenv("TV_PASSWORD", "")
 
-# TradingView chart URL — use a saved chart ID so indicators are preserved
-TRADINGVIEW_CHART_URL = os.getenv(
-    "TRADINGVIEW_CHART_URL",
-    "https://in.tradingview.com/chart/RexSiIGM/?symbol=NSE%3ANIFTY1%21"
-)
+# TradingView chart layout IDs
+NIFTY_CHART_ID = os.getenv("NIFTY_CHART_ID", "Nchart")
+BANKNIFTY_CHART_ID = os.getenv("BANKNIFTY_CHART_ID", "BNChart")
 
-# Kept for backward compatibility
-TRADINGVIEW_CHART_BASE_URL = TRADINGVIEW_CHART_URL
+# Base URL for any chart - identifiers will be injected at runtime
+TRADINGVIEW_CHART_BASE_URL = "https://in.tradingview.com/chart"
+
+# Kept for backward compatibility (defaults to Nifty)
+TRADINGVIEW_CHART_URL = f"{TRADINGVIEW_CHART_BASE_URL}/{NIFTY_CHART_ID}/?symbol=NSE%3ANIFTY1%21"
 
 NSE_OC_URL = "https://www.nseindia.com/option-chain"
 FORCE_FETCH = os.getenv("FORCE_FETCH", "false").lower() == "true"

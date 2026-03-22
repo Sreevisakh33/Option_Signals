@@ -107,14 +107,19 @@ class TradingViewFetcher:
 
                 logger.info("Authenticated via persistent session.")
 
+                from src.utils.settings import NIFTY_CHART_ID, BANKNIFTY_CHART_ID, TRADINGVIEW_CHART_BASE_URL
+                
                 for interval in intervals:
-                    # Replace NIFTY with BANKNIFTY in the URL if needed
-                    base_url = TRADINGVIEW_CHART_URL
+                    # Select Layout ID and Symbol based on target index
                     if "BANK" in symbol.upper():
-                         base_url = base_url.replace("NIFTY", "BANKNIFTY")
+                         chart_id = BANKNIFTY_CHART_ID
+                         tv_symbol = "NSE%3ABANKNIFTY1%21"
+                    else:
+                         chart_id = NIFTY_CHART_ID
+                         tv_symbol = "NSE%3ANIFTY1%21"
                     
-                    url = f"{base_url}&interval={interval}"
-                    logger.info("Navigating to %sm chart...", interval)
+                    url = f"{TRADINGVIEW_CHART_BASE_URL}/{chart_id}/?symbol={tv_symbol}&interval={interval}"
+                    logger.info("Navigating to %s %sm chart (Layout: %s)...", symbol.upper(), interval, chart_id)
                     page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_selector("canvas", timeout=30000)
                     time.sleep(5)   # Allow CPR/EMA/Volume indicators to fully render
