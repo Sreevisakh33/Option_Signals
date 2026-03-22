@@ -33,7 +33,7 @@ class BankNiftyOptionsAgent(BaseAgent):
             self.llm_client = None
             logger.warning("OPENAI_API_KEY is not set.")
             
-        self.system_prompt = load_prompt("system_prompt")
+        self.system_prompt = load_prompt("bank_nifty_system_prompt")
         self.options_calc = OptionsCalculator()
         
     def acquire_data(self) -> tuple[dict, list[str], float]:
