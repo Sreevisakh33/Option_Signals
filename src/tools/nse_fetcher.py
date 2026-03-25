@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 from src.utils.settings import NSE_OC_URL
