@@ -83,50 +83,50 @@ class NSEFetcher:
                     
                     page.on("response", on_response)
                     
-                        # Primary: Network Interception (via page.on listener)
-                        # Secondary: DOM Scraping (direct from window._optionChainData)
+                    # Primary: Network Interception (via page.on listener)
+                    # Secondary: DOM Scraping (direct from window._optionChainData)
+                    try:
+                        target_url = f"{NSE_OC_URL}?symbol={symbol.upper()}"
+                        logger.info("Navigating to NSE Option Chain: %s", target_url)
+                        page.goto(f"{target_url}&refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
+                        
+                        # Explicitly select the symbol from the dropdown
                         try:
-                            target_url = f"{NSE_OC_URL}?symbol={symbol.upper()}"
-                            logger.info("Navigating to NSE Option Chain: %s", target_url)
-                            page.goto(f"{target_url}&refresh={int(datetime.now().timestamp())}", wait_until="load", timeout=60000)
-                            
-                            # Explicitly select the symbol from the dropdown
+                            page.wait_for_selector("#equity_optionchain_select", timeout=10000)
+                            page.select_option("#equity_optionchain_select", value=symbol.upper())
+                            logger.info("Explicitly selected '%s' from NSE dropdown.", symbol.upper())
+                        except Exception as sel_err:
+                            logger.warning(f"Failed to explicitly select symbol from dropdown: {sel_err}. Relying on URL parameter.")
+                        
+                        # Wait for captured response (max 15 seconds loop)
+                        timeout_limit = time.time() + 15
+                        while not captured_response and time.time() < timeout_limit:
+                            time.sleep(0.5)
+                        
+                        if captured_response:
+                            json_data = captured_response[0]
+                            logger.info("Successfully intercepted NSE JSON via network traffic.")
+                        else:
+                            # FALLBACK: SCRAPE FROM DOM
+                            logger.info("Network interception timed out. Attempting DOM scraping fallback...")
                             try:
-                                page.wait_for_selector("#equity_optionchain_select", timeout=10000)
-                                page.select_option("#equity_optionchain_select", value=symbol.upper())
-                                logger.info("Explicitly selected '%s' from NSE dropdown.", symbol.upper())
-                            except Exception as sel_err:
-                                logger.warning(f"Failed to explicitly select symbol from dropdown: {sel_err}. Relying on URL parameter.")
-                            
-                            # Wait for captured response (max 15 seconds loop)
-                            timeout_limit = time.time() + 15
-                            while not captured_response and time.time() < timeout_limit:
-                                time.sleep(0.5)
-                            
-                            if captured_response:
-                                json_data = captured_response[0]
-                                logger.info("Successfully intercepted NSE JSON via network traffic.")
-                            else:
-                                # FALLBACK: SCRAPE FROM DOM
-                                logger.info("Network interception timed out. Attempting DOM scraping fallback...")
-                                try:
-                                    # NSE often stores the data in a script tag or hidden element
-                                    # Wait for the table to at least ensure content is there
-                                    page.wait_for_selector("#equity_optionchain_select", timeout=5000)
-                                    # Try to find the JSON in the page script context if available
-                                    # Note: NSE usually renders via background fetch, so we check if it finished
-                                    # Most reliable DOM fallback is actually extracting from specific script tags if they exist,
-                                    # or looking for a global variable.
-                                    dom_json = page.evaluate("() => { try { return window._optionChainData; } catch { return null; } }")
-                                    if dom_json:
-                                        json_data = dom_json
-                                        logger.info("Successfully extracted NSE JSON from DOM (window._optionChainData).")
-                                except Exception as dom_err:
-                                    logger.warning(f"DOM scraping fallback failed: {dom_err}")
-                                    
-                            if not json_data:
-                                logger.warning("No fresh JSON intercepted or scraped on attempt %d.", attempt)
-                                continue
+                                # NSE often stores the data in a script tag or hidden element
+                                # Wait for the table to at least ensure content is there
+                                page.wait_for_selector("#equity_optionchain_select", timeout=5000)
+                                # Try to find the JSON in the page script context if available
+                                # Note: NSE usually renders via background fetch, so we check if it finished
+                                # Most reliable DOM fallback is actually extracting from specific script tags if they exist,
+                                # or looking for a global variable.
+                                dom_json = page.evaluate("() => { try { return window._optionChainData; } catch { return null; } }")
+                                if dom_json:
+                                    json_data = dom_json
+                                    logger.info("Successfully extracted NSE JSON from DOM (window._optionChainData).")
+                            except Exception as dom_err:
+                                logger.warning(f"DOM scraping fallback failed: {dom_err}")
+                                
+                        if not json_data:
+                            logger.warning("No fresh JSON intercepted or scraped on attempt %d.", attempt)
+                            continue
                         
                         # VALIDATE TIMESTAMP
                         ts_str = json_data.get("records", {}).get("timestamp", "")
