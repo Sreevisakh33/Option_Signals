@@ -54,14 +54,15 @@ class NSEFetcher:
                     
                     # Use expect_response with a more specific filter to ensure we get the full data
                     def is_full_data(response):
-                        if "api/option-chain" in response.url and symbol.upper() in response.url and response.status == 200:
+                        # The URL can be /api/option-chain-indices or /api/option-chain-equities
+                        url = response.url.upper()
+                        target_symbol = symbol.upper()
+                        if "API/OPTION-CHAIN" in url and target_symbol in url and response.status == 200:
                             try:
                                 data = response.json()
-                                # Ensure we have records and actual option chain data rows
-                                has_records = "records" in data and "data" in data["records"]
-                                if has_records:
-                                    # Ensure the data list isn't empty (common at night/maintenance)
-                                    return len(data["records"]["data"]) > 0
+                                # Relaxed record check: just ensure we have 'records' or 'filtered'
+                                if "records" in data or "filtered" in data:
+                                    return True
                                 return False
                             except:
                                 return False
