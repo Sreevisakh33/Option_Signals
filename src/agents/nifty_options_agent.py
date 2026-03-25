@@ -235,6 +235,7 @@ class NiftyOptionsAgent(BaseAgent):
             json_data, chart_paths, spot_price = self.acquire_data()
             if not json_data:
                 logger.error("Failed to acquire live market data. Market may not be open yet (starts at 09:15 AM IST). Aborting for safety.")
+                # We skip archiving if we didn't get data to preserve charts for manual inspection
                 return
             
             # Log Data Freshness
@@ -311,7 +312,10 @@ class NiftyOptionsAgent(BaseAgent):
         except Exception as e:
             logger.error("Fatal error in agent execution: %s", e)
         finally:
-            self.archive_downloads()
+            # Only archive if we actually successfully acquired data, 
+            # otherwise keep snapshots in place for manual debugging.
+            if 'json_data' in locals() and json_data:
+                self.archive_downloads()
 
     def log_json_signal(self, signal_data: dict, nearest_expiry: str = ""):
         """Logs the structured JSON signal to paper_trades.csv."""

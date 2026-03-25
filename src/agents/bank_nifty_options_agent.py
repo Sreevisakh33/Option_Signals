@@ -201,7 +201,8 @@ class BankNiftyOptionsAgent(BaseAgent):
             # Step 1: Collect Bank Nifty Data
             json_data, chart_paths, spot_price = self.acquire_data()
             if not json_data:
-                logger.error("Failed to acquire Bank Nifty data.")
+                logger.error("Failed to acquire Bank Nifty data. Aborting for safety.")
+                # We skip archiving if we didn't get data to preserve charts for manual inspection
                 return
             
             logger.info(f">>> BANK NIFTY DATA: Spot: {spot_price}")
@@ -287,7 +288,10 @@ class BankNiftyOptionsAgent(BaseAgent):
         except Exception as e:
             logger.error("Fatal error in Bank Nifty agent: %s", e)
         finally:
-            self.archive_downloads()
+            # Only archive if we actually successfully acquired data, 
+            # otherwise keep snapshots in place for manual debugging.
+            if 'json_data' in locals() and json_data:
+                self.archive_downloads()
 
     def log_json_signal(self, signal_data: dict, nearest_expiry: str = ""):
         """Logs Bank Nifty structured signal to paper_trades.csv."""
